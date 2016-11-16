@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,8 +21,10 @@ from __future__ import print_function
 from six.moves import xrange  # pylint: disable=redefined-builtin
 
 from tensorflow.python.framework import ops
+from tensorflow.python.framework import sparse_tensor
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import math_ops
+# go/tf-wildcard-import
 # pylint: disable=wildcard-import,undefined-variable
 from tensorflow.python.ops.control_flow_ops import *
 from tensorflow.python.ops.gen_control_flow_ops import *
@@ -36,43 +38,39 @@ def _SwitchGrad(op, *grad):
   the merge on the first visit, and update the other input of the merge
   on the second visit. A next_iteration is also added on second visit.
   """
-  real_op = GetRealOp(op)
+  graph = ops.get_default_graph()
   # pylint: disable=protected-access
-  ctxt = real_op._get_control_flow_context()
+  op_ctxt = op._get_control_flow_context()
+  grad_ctxt = graph._get_control_flow_context()
   # pylint: enable=protected-access
-  if isinstance(ctxt, WhileContext):
-    merge_op = op.grad_state.switch_map.get(real_op)
-    if merge_op:
+  if isinstance(op_ctxt, WhileContext):
+    merge_grad = grad_ctxt.grad_state.switch_map.get(op)
+    if merge_grad is not None:
       # This is the second time this Switch is visited. It comes from
       # the non-exit branch of the Switch, so update the second input
       # to the Merge.
-      # TODO: Need to perform shape inference with this new input.
-      # pylint: disable=protected-access
-      merge_op._update_input(1, control_flow_ops._NextIteration(grad[1]))
-      # pylint: enable=protected-access
+      # TODO: Perform shape inference with this new input.
+      if grad[1] is not None:
+        # pylint: disable=protected-access
+        control_flow_ops._AddNextAndBackEdge(merge_grad, grad[1])
+        # pylint: enable=protected-access
       return None, None
     else:
-      # This is the first time this Switch is visited. It always comes
-      # from the Exit branch, which is grad[0]. grad[1] is empty at this point.
+      # This is the first time this Switch is visited. It always comes from
+      # the Exit branch, which is grad[0]. grad[1] is empty at this point.
       # Use grad[0] for both inputs to merge for now, but update the second
       # input of merge when we see this Switch the second time.
-      merge_fn = control_flow_ops._Merge  # pylint: disable=protected-access
-      merge_op = merge_fn([grad[0], grad[0]], name="b_switch")[0]
-      op.grad_state.switch_map[real_op] = merge_op.op
-      return merge_op, None
-  elif isinstance(ctxt, CondContext):
-    good_grad = grad[ctxt.branch]
-    zero_grad = grad[1 - ctxt.branch]
-    # If this Switch is wrapped, it is part of a cond within a loop. In
-    # this case, we have called ControlFlowState.ZeroLike() so grad is
-    # ready for merge. Otherwise, we need a switch to control zero_grad.
-    if not isinstance(op, ControlFlowOpWrapper):
-      dtype = good_grad.dtype
-      zero_grad = switch(zero_grad, ctxt.pred, dtype=dtype)[1 - ctxt.branch]
+      merge_grad = merge([grad[0], grad[0]], name="b_switch")[0]
+      grad_ctxt.grad_state.switch_map[op] = merge_grad
+      return merge_grad, None
+  elif isinstance(op_ctxt, CondContext):
+    good_grad = grad[op_ctxt.branch]
+    zero_grad = grad[1 - op_ctxt.branch]
+    # At this point, we have created zero_grad guarded by the right switch.
     return merge([good_grad, zero_grad], name="cond_grad")[0], None
   else:
-    false_grad = switch(grad[0], real_op.inputs[1])[0]
-    true_grad = switch(grad[1], real_op.inputs[1])[1]
+    false_grad = switch(grad[0], op.inputs[1])[0]
+    true_grad = switch(grad[1], op.inputs[1])[1]
     return merge([false_grad, true_grad])[0], None
 
 
@@ -83,26 +81,26 @@ ops.RegisterGradient("RefSwitch")(_SwitchGrad)
 @ops.RegisterGradient("Merge")
 def _MergeGrad(op, grad, _):
   """Gradients for a Merge op are calculated using a Switch op."""
-  real_op = GetRealOp(op)
-  input_op = real_op.inputs[0].op
+  input_op = op.inputs[0].op
+  graph = ops.get_default_graph()
   # pylint: disable=protected-access
-  ctxt = input_op._get_control_flow_context()
+  op_ctxt = input_op._get_control_flow_context()
+  grad_ctxt = graph._get_control_flow_context()
   # pylint: enable=protected-access
-  if isinstance(ctxt, WhileContext):
-    grad_ctxt = op.grad_state.grad_context
+  if isinstance(op_ctxt, WhileContext):
     # pylint: disable=protected-access
     return control_flow_ops._SwitchRefOrTensor(grad, grad_ctxt.pivot)
     # pylint: enable=protected-access
-  elif isinstance(ctxt, CondContext):
-    pred = ctxt.pred
-    if isinstance(op, ControlFlowOpWrapper):
+  elif isinstance(op_ctxt, CondContext):
+    pred = op_ctxt.pred
+    if grad_ctxt and grad_ctxt.grad_state:
       # This Merge node is part of a cond within a loop.
       # The backprop needs to have the value of this predicate for every
       # iteration. So we must have its values accumulated in the forward, and
       # use the accumulated values as the predicate for this backprop switch.
-      grad_state = op.grad_state
+      grad_state = grad_ctxt.grad_state
       real_pred = grad_state.history_map.get(pred.name)
-      if not real_pred:
+      if real_pred is None:
         # Remember the value of pred for every iteration.
         grad_ctxt = grad_state.grad_context
         grad_ctxt.Exit()
@@ -118,8 +116,8 @@ def _MergeGrad(op, grad, _):
     return control_flow_ops._SwitchRefOrTensor(grad, pred, name="cond_grad")
     # pylint: enable=protected-access
   else:
-    num_inputs = len(real_op.inputs)
-    cond = [math_ops.equal(real_op.outputs[1], i) for i in xrange(num_inputs)]
+    num_inputs = len(op.inputs)
+    cond = [math_ops.equal(op.outputs[1], i) for i in xrange(num_inputs)]
     # pylint: disable=protected-access
     return [control_flow_ops._SwitchRefOrTensor(grad, cond[i])[1]
             for i in xrange(num_inputs)]
@@ -134,15 +132,34 @@ def _RefMergeGrad(op, grad, _):
 @ops.RegisterGradient("Exit")
 def _ExitGrad(op, grad):
   """Gradients for an exit op are calculated using an Enter op."""
-  real_op = GetRealOp(op)
+  graph = ops.get_default_graph()
   # pylint: disable=protected-access
-  forward_ctxt = real_op._get_control_flow_context()
+  grad_ctxt = graph._get_control_flow_context()
   # pylint: enable=protected-access
-  if not forward_ctxt.back_prop:
-    # No gradient computation for this loop.
+  if not grad_ctxt.back_prop:
+    # The flag `back_prop` is set by users to suppress gradient
+    # computation for this loop. If the attribute `back_prop` is false,
+    # no gradient computation.
     return None
-  grad_ctxt = op.grad_state.grad_context
-  grad_ctxt.AddName(grad.name)
+
+  # pylint: disable=protected-access
+  if op._get_control_flow_context().grad_state:
+    raise TypeError("Second-order gradient for while loops not supported.")
+  # pylint: enable=protected-access
+
+  if isinstance(grad, ops.Tensor):
+    grad_ctxt.AddName(grad.name)
+  else:
+    if not isinstance(grad, (ops.IndexedSlices, sparse_tensor.SparseTensor)):
+      raise TypeError("Type %s not supported" % type(grad))
+    grad_ctxt.AddName(grad.values.name)
+    grad_ctxt.AddName(grad.indices.name)
+    if isinstance(grad, ops.IndexedSlices):
+      dense_shape = grad.dense_shape
+    else:
+      dense_shape = grad.shape
+    if dense_shape is not None:
+      grad_ctxt.AddName(dense_shape.name)
   enter_fn = control_flow_ops._Enter  # pylint: disable=protected-access
   grad_ctxt.Enter()
   result = enter_fn(grad, grad_ctxt.name, is_constant=False,
@@ -176,19 +193,25 @@ def _EnterGrad(op, grad):
   For loop variables, grad is the gradient so just add an exit.
   For loop invariants, we need to add an accumulator loop.
   """
-  real_op = GetRealOp(op)
+  graph = ops.get_default_graph()
   # pylint: disable=protected-access
-  forward_ctxt = real_op._get_control_flow_context()
+  grad_ctxt = graph._get_control_flow_context()
   # pylint: enable=protected-access
-  if not forward_ctxt.back_prop:
-    # The flag `back_prop` is set by users to suppress gradient
-    # computation for this loop. If the flag `back_prop` is true,
-    # no gradient computation.
+  if not grad_ctxt.back_prop:
+    # Skip gradient computation, if the attribute `back_prop` is false.
     return grad
-  grad_ctxt = op.grad_state.grad_context
-  if real_op.get_attr("is_constant"):
+  if grad_ctxt.grad_state is None:
+    # Pass the gradient grough if we are not in a gradient while context.
+    return grad
+  if op.get_attr("is_constant"):
     # Add a gradient accumulator for each loop invariant.
-    result = grad_ctxt.AddBackPropAccumulator(grad)
+    if isinstance(grad, ops.Tensor):
+      result = grad_ctxt.AddBackPropAccumulator(op, grad)
+    elif isinstance(grad, ops.IndexedSlices):
+      result = grad_ctxt.AddBackPropIndexedSlicesAccumulator(op, grad)
+    else:
+      # TODO(yuanbyu, lukasr): Add support for SparseTensor.
+      raise TypeError("Type %s not supported" % type(grad))
   else:
     result = exit(grad)
     grad_ctxt.ExitResult([result])

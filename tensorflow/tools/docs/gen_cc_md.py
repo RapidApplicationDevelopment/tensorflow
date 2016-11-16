@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,14 +18,12 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import argparse
 import os
 import re
-import sys
 
 from BeautifulSoup import BeautifulStoneSoup
-
-from tensorflow.python import flags
-
+import tensorflow as tf
 
 ANCHOR_RE = re.compile(r'\W+')
 
@@ -87,7 +85,6 @@ write the graph to a file.
 @@TensorShapeUtils
 @@PartialTensorShape
 @@PartialTensorShapeUtils
-@@TF_Buffer
 
 ## Thread
 
@@ -95,11 +92,7 @@ write the graph to a file.
 @@ThreadOptions
 '''
 
-FLAGS = flags.FLAGS
-flags.DEFINE_string('src_dir', None,
-                    'Directory containing the doxygen output.')
-flags.DEFINE_string('out_dir', None,
-                    'Directory to which docs should be written.')
+FLAGS = None
 
 
 def member_definition(member_elt):
@@ -255,7 +248,6 @@ class Page(object):
     self.name = soup.find('compoundname').text
     print('Making page with name ' + self.name + ' (from ' + xml_path + ')')
     members = soup('memberdef', prot='public')
-    briefs = all_briefs(members)
     fulls = all_fulls(members)
     self.overview = page_overview(soup.find('compounddef'))
     self.page_text = PAGE_TEMPLATE.format(
@@ -275,7 +267,8 @@ class Page(object):
     return self.type
 
   def get_md_filename(self):
-    return self.get_type() + anchorize(self.get_short_name()) + '.md'
+    capitalized_type = self.get_type()[0].upper() + self.get_type()[1:]
+    return capitalized_type + anchorize(self.get_short_name()) + '.md'
 
 
 def main(unused_argv):
@@ -303,4 +296,19 @@ def main(unused_argv):
   return 0
 
 if __name__ == '__main__':
-  main(sys.argv)
+  parser = argparse.ArgumentParser()
+  parser.add_argument(
+      '--src_dir',
+      type=str,
+      default=None,
+      help='Directory containing the doxygen output.'
+  )
+  parser.add_argument(
+      '--out_dir',
+      type=str,
+      default=None,
+      help='Directory to which docs should be written.'
+  )
+  FLAGS = parser.parse_args()
+
+  tf.app.run()

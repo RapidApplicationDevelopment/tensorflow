@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,9 +26,11 @@ namespace tensorflow {
 namespace {
 
 template <DataType DT>
-Status HandleSliceToElement(const Tensor& parent, Tensor* element, int index) {
+Status HandleSliceToElement(const Tensor& parent, Tensor* element,
+                            int64 index) {
   typedef typename EnumToDataType<DT>::Type T;
   DCHECK_NE(parent.dim_size(0), 0);
+  DCHECK_GE(index, 0);
   if (element->NumElements() != (parent.NumElements() / parent.dim_size(0))) {
     TensorShape chip_shape = parent.shape();
     chip_shape.RemoveDim(0);
@@ -47,6 +49,7 @@ template <DataType DT>
 Status HandleElementToSlice(const Tensor& element, Tensor* parent, int index) {
   typedef typename EnumToDataType<DT>::Type T;
   DCHECK_NE(parent->dim_size(0), 0);
+  DCHECK_GE(index, 0);
   if (element.NumElements() != (parent->NumElements() / parent->dim_size(0))) {
     TensorShape chip_shape = parent->shape();
     chip_shape.RemoveDim(0);
@@ -71,6 +74,8 @@ QueueBase::QueueBase(int32 capacity, const DataTypeVector& component_dtypes,
       component_shapes_(component_shapes),
       name_(name),
       closed_(false) {}
+
+QueueBase::~QueueBase() {}
 
 Status QueueBase::ValidateTupleCommon(const Tuple& tuple) const {
   if (tuple.size() != static_cast<size_t>(num_components())) {
@@ -262,7 +267,7 @@ void QueueBase::Close(OpKernelContext* ctx, bool cancel_pending_enqueues,
           [this](Attempt* attempt) EXCLUSIVE_LOCKS_REQUIRED(mu_) {
             if (closed_) {
               attempt->context->SetStatus(
-                  errors::Aborted("Queue '", name_, "' is already closed."));
+                  errors::Cancelled("Queue '", name_, "' is already closed."));
             } else {
               closed_ = true;
             }
@@ -283,9 +288,21 @@ bool QueueBase::TryAttemptLocked(Action action,
   while (!done && !attempts->empty()) {
     if (attempts->front().is_cancelled) {
       if (action == kEnqueue) {
-        LOG(INFO) << "Skipping cancelled enqueue attempt";
+        if (closed_) {
+          VLOG(1) << "Skipping cancelled enqueue attempt";
+        } else {
+          LOG(WARNING)
+              << name_
+              << ": Skipping cancelled enqueue attempt with queue not closed";
+        }
       } else {
-        LOG(INFO) << "Skipping cancelled dequeue attempt";
+        if (closed_) {
+          VLOG(1) << "Skipping cancelled dequeue attempt";
+        } else {
+          LOG(WARNING)
+              << name_
+              << ": Skipping cancelled dequeue attempt with queue not closed";
+        }
       }
       attempts->pop_front();
     } else {
@@ -335,13 +352,14 @@ void QueueBase::FlushUnlocked() {
 }
 
 Status QueueBase::CopySliceToElement(const Tensor& parent, Tensor* element,
-                                     int index) {
+                                     int64 index) {
 #define HANDLE_TYPE(DT)                                                   \
   if (parent.dtype() == DT) {                                             \
     TF_RETURN_IF_ERROR(HandleSliceToElement<DT>(parent, element, index)); \
     return Status::OK();                                                  \
   }
   HANDLE_TYPE(DT_FLOAT);
+  HANDLE_TYPE(DT_HALF);
   HANDLE_TYPE(DT_DOUBLE);
   HANDLE_TYPE(DT_INT32);
   HANDLE_TYPE(DT_UINT8);
@@ -349,6 +367,7 @@ Status QueueBase::CopySliceToElement(const Tensor& parent, Tensor* element,
   HANDLE_TYPE(DT_INT8);
   HANDLE_TYPE(DT_STRING);
   HANDLE_TYPE(DT_COMPLEX64);
+  HANDLE_TYPE(DT_COMPLEX128);
   HANDLE_TYPE(DT_INT64);
   HANDLE_TYPE(DT_BOOL);
   HANDLE_TYPE(DT_QINT8);
@@ -363,13 +382,14 @@ Status QueueBase::CopySliceToElement(const Tensor& parent, Tensor* element,
 
 // Static method
 Status QueueBase::CopyElementToSlice(const Tensor& element, Tensor* parent,
-                                     int index) {
+                                     int64 index) {
 #define HANDLE_TYPE(DT)                                                   \
   if (element.dtype() == DT) {                                            \
     TF_RETURN_IF_ERROR(HandleElementToSlice<DT>(element, parent, index)); \
     return Status::OK();                                                  \
   }
   HANDLE_TYPE(DT_FLOAT);
+  HANDLE_TYPE(DT_HALF);
   HANDLE_TYPE(DT_DOUBLE);
   HANDLE_TYPE(DT_INT32);
   HANDLE_TYPE(DT_UINT8);
@@ -377,6 +397,7 @@ Status QueueBase::CopyElementToSlice(const Tensor& element, Tensor* parent,
   HANDLE_TYPE(DT_INT8);
   HANDLE_TYPE(DT_STRING);
   HANDLE_TYPE(DT_COMPLEX64);
+  HANDLE_TYPE(DT_COMPLEX128);
   HANDLE_TYPE(DT_INT64);
   HANDLE_TYPE(DT_BOOL);
   HANDLE_TYPE(DT_QINT8);

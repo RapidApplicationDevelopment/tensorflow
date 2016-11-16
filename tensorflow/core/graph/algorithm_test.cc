@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -70,7 +70,6 @@ bool ExpectBefore(const std::vector<std::pair<string, string>>& ordered_pairs,
 }
 
 TEST(AlgorithmTest, ReversePostOrder) {
-  RequireDefaultOps();
   GraphDefBuilder b(GraphDefBuilder::kFailImmediately);
   using namespace ::tensorflow::ops;  // NOLINT(build/namespaces)
   Node* w1 = SourceOp("TestParams", b.opts().WithName("W1"));

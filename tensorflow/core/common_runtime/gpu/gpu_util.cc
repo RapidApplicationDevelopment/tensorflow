@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -154,6 +154,11 @@ void GPUUtil::SetProtoFromGPU(const Tensor& tensor, Device* dev,
     port::Tracing::ScopedAnnotation annotation("SetProtoFromGPU");
     alloc = ProcessState::singleton()->GetCUDAHostAllocator(0);
     buf = alloc->Allocate<char>(total_bytes);
+    if (LogMemory::IsEnabled()) {
+      LogMemory::RecordRawAllocation("SetProtoFromGPU",
+                                     LogMemory::PROTO_BUFFER_STEP_ID,
+                                     total_bytes, buf, alloc);
+    }
     void* src_ptr = GetBase(&tensor);
     DeviceMemoryBase gpu_src_ptr(src_ptr, total_bytes);
     send_device_to_host_stream->ThenMemcpy(buf, gpu_src_ptr, total_bytes);
@@ -170,6 +175,11 @@ void GPUUtil::SetProtoFromGPU(const Tensor& tensor, Device* dev,
         if (total_bytes > 0) {
           port::CopyFromArray(proto->mutable_tensor_content(), buf,
                               total_bytes);
+          if (LogMemory::IsEnabled()) {
+            LogMemory::RecordRawDeallocation("SetProtoFromGPU",
+                                             LogMemory::PROTO_BUFFER_STEP_ID,
+                                             buf, alloc, false);
+          }
           alloc->Deallocate<char>(buf, total_bytes);
         }
         done(Status::OK());
@@ -378,7 +388,7 @@ string GPUUtil::MemoryDebugString(const Device* device, Tensor* tensor) {
       string buf;
       buf.resize(num_bytes);
       DeviceMemoryBase gpu_ptr(ptr, num_bytes);
-      Status s = dev_info->stream->parent()->SynchronousMemcpyD2H(
+      auto s = dev_info->stream->parent()->SynchronousMemcpyD2H(
           gpu_ptr, num_bytes, gtl::string_as_array(&buf));
       strings::StrAppend(&ret,
                          PrintMemory(gtl::string_as_array(&buf), num_bytes));
@@ -414,6 +424,34 @@ uint64 GPUUtil::Checksum(const Tensor& tensor) {
   // TODO(tucker): consider using crc32c instead.
   return Hash64(reinterpret_cast<const char*>(GetBase(&tensor)),
                 tensor.TotalBytes(), 0);
+}
+
+// static
+void GPUUtil::CopyGPUTensorToSameGPU(Device* gpu_device,
+                                     const DeviceContext* device_context,
+                                     const Tensor* src_gpu_tensor,
+                                     Tensor* dst_gpu_tensor,
+                                     StatusCallback done) {
+  VLOG(1) << "CopyGPUTensorToSameGPU";
+  const DeviceBase::GpuDeviceInfo* dev_info = nullptr;
+  gpu::Stream* send_stream = nullptr;
+  Status s = PrepareCopy(gpu_device, device_context, *src_gpu_tensor,
+                         dst_gpu_tensor, &dev_info, &send_stream);
+  if (!s.ok()) {
+    done(s);
+    return;
+  }
+
+  const int64 total_bytes = src_gpu_tensor->TotalBytes();
+  if (total_bytes > 0) {
+    void* src_ptr = GetBase(src_gpu_tensor);
+    DeviceMemoryBase gpu_src_ptr(src_ptr, total_bytes);
+    void* dst_ptr = GetBase(dst_gpu_tensor);
+    DeviceMemoryBase gpu_dst_ptr(dst_ptr, total_bytes);
+    send_stream->ThenMemcpy(&gpu_dst_ptr, gpu_src_ptr, total_bytes);
+  }
+
+  done(Status::OK());
 }
 
 }  // namespace tensorflow

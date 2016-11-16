@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -159,6 +159,21 @@ class DecodeCSVOpTest(tf.test.TestCase):
     self._test(
         args,
         expected_err_re="Unquoted fields cannot have quotes/CRLFs inside")
+
+  def testWrongDefaults(self):
+    args = {
+        "records": [",1", "0.2,2", "3.0adf,3"],
+        "record_defaults": [[1.0]]
+    }
+
+    self._test(args,
+               expected_err_re="Expect 1 fields but have 2 in record 0")
+
+  def testShortQuotedString(self):
+    args = {"records": ["\""], "record_defaults": [["default"]],}
+
+    self._test(args,
+               expected_err_re="Quoted field has to end with quote followed.*")
 
 
 if __name__ == "__main__":

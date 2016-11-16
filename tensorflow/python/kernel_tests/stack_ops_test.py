@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,9 +18,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import numpy as np
 import tensorflow as tf
 
 from tensorflow.python.framework import errors
+from tensorflow.python.framework import tensor_shape
 from tensorflow.python.ops import gen_data_flow_ops
 
 
@@ -37,6 +39,50 @@ class StackOpTest(tf.test.TestCase):
   def testStackPushPop(self):
     self._testStackPushPop(use_gpu=False)
     self._testStackPushPop(use_gpu=True)
+
+  def _testStackPushPopSwap(self, use_gpu):
+    with self.test_session(use_gpu=use_gpu):
+      a = np.arange(2000)
+      x = tf.constant(a, dtype=tf.float32)
+      h = gen_data_flow_ops._stack(tf.float32, stack_name="foo")
+      c = gen_data_flow_ops._stack_push(h, x, swap_memory=True)
+      with tf.control_dependencies([c]):
+        c1 = gen_data_flow_ops._stack_pop(h, tf.float32)
+      self.assertAllClose(a, c1.eval())
+
+  def testStackPushPopSwap(self):
+    self._testStackPushPopSwap(use_gpu=False)
+    self._testStackPushPopSwap(use_gpu=True)
+
+  def _testStackWhileSwap(self, use_gpu):
+    with self.test_session(use_gpu=use_gpu):
+      n = tf.constant(0)
+      h = gen_data_flow_ops._stack(tf.float32, stack_name="foo")
+
+      def c(x):
+        return tf.less(x, 10)
+      def b(x):
+        with tf.control_dependencies([x]):
+          a = tf.constant(np.ones(2000), dtype=tf.float32)
+          v = gen_data_flow_ops._stack_push(h, a, swap_memory=True)
+        with tf.control_dependencies([v]):
+          return tf.add(x, 1)
+      r = tf.while_loop(c, b, [n])
+
+      v = tf.constant(np.zeros(2000), dtype=tf.float32)
+      def c1(x, y):
+        return tf.greater(x, 0)
+      def b1(x, y):
+        nx = tf.sub(x, 1)
+        ny = y + gen_data_flow_ops._stack_pop(h, tf.float32)
+        return [nx, ny]
+      rx, ry = tf.while_loop(c1, b1, [r, v],
+                             [r.get_shape(), tensor_shape.unknown_shape()])
+      self.assertAllClose(np.ones(2000) * 10.0, ry.eval())
+
+  def testStackWhileSwap(self):
+    self._testStackWhileSwap(use_gpu=False)
+    self._testStackWhileSwap(use_gpu=True)
 
   def _testMultiStack(self, use_gpu):
     with self.test_session(use_gpu=use_gpu):
@@ -55,19 +101,18 @@ class StackOpTest(tf.test.TestCase):
     self._testMultiStack(use_gpu=False)
     self._testMultiStack(use_gpu=True)
 
-  def _testDuplicateStack(self, use_gpu):
+  def _testSameNameStacks(self, use_gpu):
     with self.test_session(use_gpu=use_gpu):
       h1 = gen_data_flow_ops._stack(tf.float32, stack_name="foo")
       c1 = gen_data_flow_ops._stack_push(h1, 4.0)
       h2 = gen_data_flow_ops._stack(tf.float32, stack_name="foo")
       c2 = gen_data_flow_ops._stack_push(h2, 5.0)
       r = c1 + c2
-      with self.assertRaises(errors.AlreadyExistsError):
-        r.eval()
+      self.assertNotEqual(h1.eval()[1], h2.eval()[1])
 
-  def testDuplicateStack(self):
-    self._testDuplicateStack(use_gpu=False)
-    self._testDuplicateStack(use_gpu=True)
+  def testSameNameStacks(self):
+    self._testSameNameStacks(use_gpu=False)
+    self._testSameNameStacks(use_gpu=True)
 
   def _testCloseStack(self, use_gpu):
     with self.test_session(use_gpu=use_gpu) as sess:

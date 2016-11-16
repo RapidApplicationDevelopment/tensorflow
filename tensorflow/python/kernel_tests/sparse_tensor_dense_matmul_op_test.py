@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,8 +24,6 @@ import time
 import numpy as np
 import tensorflow as tf
 
-from tensorflow.python.client import graph_util
-from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import sparse_ops
 # pylint: enable=g-bad-import-order,unused-import
 
@@ -38,7 +36,7 @@ def _maybe_complex(x):
 
 class SparseTensorDenseMatMulTest(tf.test.TestCase):
 
-  def _testMatmul(self, x, y, adjoint_a=False, adjoint_b=False, use_gpu=False):
+  def _testMatmul(self, x, y, adjoint_a=False, adjoint_b=False):
     x_mat = np.matrix(x)
     if adjoint_a:
       x_mat = x_mat.H
@@ -52,19 +50,26 @@ class SparseTensorDenseMatMulTest(tf.test.TestCase):
     x_values = x[np.where(x)]
     x_shape = x.shape
 
-    with self.test_session(use_gpu=use_gpu):
-      sp_x = tf.SparseTensor(indices=x_indices, values=x_values, shape=x_shape)
-      tf_ans = sparse_ops.sparse_tensor_dense_matmul(
-          sp_x, y, adjoint_a=adjoint_a, adjoint_b=adjoint_b)
-      out = tf_ans.eval()
-    # Ensure that the RHS shape is known at least.
-    self.assertEqual(tf_ans.get_shape()[1], np_ans.shape[1])
-    if x.dtype == np.float32:
-      self.assertAllClose(np_ans, out, rtol=1e-4, atol=1e-4)
-    elif x.dtype == np.float64:
-      self.assertAllClose(np_ans, out, rtol=1e-6, atol=1e-6)
-    else:
-      self.assertAllClose(np_ans, out, rtol=1e-4, atol=1e-4)
+    with self.test_session(use_gpu=True):
+      sp_x_value = tf.SparseTensorValue(
+          indices=x_indices, values=x_values, shape=x_shape)
+      tf_value_ans = sparse_ops.sparse_tensor_dense_matmul(
+          sp_x_value, y, adjoint_a=adjoint_a, adjoint_b=adjoint_b)
+      tf_tensor_ans = sparse_ops.sparse_tensor_dense_matmul(
+          tf.SparseTensor.from_value(sp_x_value), y, adjoint_a=adjoint_a,
+          adjoint_b=adjoint_b)
+
+      # Ensure that the RHS shape is known at least.
+      self.assertEqual(tf_value_ans.get_shape()[1], np_ans.shape[1])
+      self.assertEqual(tf_tensor_ans.get_shape()[1], np_ans.shape[1])
+
+      for out in (tf_value_ans.eval(), tf_tensor_ans.eval()):
+        if x.dtype == np.float32:
+          self.assertAllClose(np_ans, out, rtol=1e-4, atol=1e-4)
+        elif x.dtype == np.float64:
+          self.assertAllClose(np_ans, out, rtol=1e-6, atol=1e-6)
+        else:
+          self.assertAllClose(np_ans, out, rtol=1e-4, atol=1e-4)
 
   def _testBasic(self, np_dtype):
     x = _maybe_complex(np.random.rand(10, 10).astype(np_dtype))
@@ -72,8 +77,7 @@ class SparseTensorDenseMatMulTest(tf.test.TestCase):
 
     y = _maybe_complex(np.random.randn(10, 20).astype(np_dtype))
 
-    self._testMatmul(x, y, use_gpu=True)
-    self._testMatmul(x, y, use_gpu=False)
+    self._testMatmul(x, y)
 
   def testBasic(self):
     np.random.seed(127)  # Repeatable results
@@ -81,6 +85,31 @@ class SparseTensorDenseMatMulTest(tf.test.TestCase):
     self._testBasic(np.float32)
     self._testBasic(np.float64)
     self._testBasic(np.complex64)
+    self._testBasic(np.complex128)
+
+  def testShapeInference(self):
+    x = np.random.rand(10, 10)
+    x[np.abs(x) < 0.5] = 0  # Make it sparse
+    y = np.random.randn(10, 20)
+    x_indices = np.vstack(np.where(x)).astype(np.int64).T
+    x_values = x[np.where(x)]
+    x_shape = x.shape
+    x_st = tf.SparseTensor(x_indices, x_values, x_shape)
+    result = tf.sparse_tensor_dense_matmul(x_st, y)
+    self.assertEqual(result.get_shape(), (10, 20))
+
+    x_shape_unknown = tf.placeholder(dtype=tf.int64, shape=None)
+    x_st_shape_unknown = tf.SparseTensor(x_indices, x_values, x_shape_unknown)
+    result_left_shape_unknown = tf.sparse_tensor_dense_matmul(
+        x_st_shape_unknown, y)
+    self.assertEqual(
+        result_left_shape_unknown.get_shape().as_list(), [None, 20])
+
+    x_shape_inconsistent = [10, 15]
+    x_st_shape_inconsistent = tf.SparseTensor(
+        x_indices, x_values, x_shape_inconsistent)
+    with self.assertRaisesRegexp(ValueError, "Dimensions must be equal"):
+      tf.sparse_tensor_dense_matmul(x_st_shape_inconsistent, y)
 
   # Tests setting one dimension to be a high value.
   def _testLarge(self, np_dtype):
@@ -96,14 +125,14 @@ class SparseTensorDenseMatMulTest(tf.test.TestCase):
 
       y = _maybe_complex(np.random.randn(k, n).astype(np_dtype))
 
-      self._testMatmul(x, y, use_gpu=False)
-      self._testMatmul(x, y, use_gpu=True)
+      self._testMatmul(x, y)
 
   def testLarge(self):
     np.random.seed(127)  # Repeatable results
     self._testLarge(np.float32)
     self._testLarge(np.float64)
     self._testLarge(np.complex64)
+    self._testLarge(np.complex128)
 
   # Tests random sized matrices.
   def testFloatRandom(self):
@@ -118,8 +147,7 @@ class SparseTensorDenseMatMulTest(tf.test.TestCase):
             y = np.random.randn(k, m).astype(np.float32)
             x = x.transpose() if adjoint_a else x
             y = y.transpose() if adjoint_b else y
-            self._testMatmul(x, y, adjoint_a, adjoint_b, use_gpu=False)
-            self._testMatmul(x, y, adjoint_a, adjoint_b, use_gpu=True)
+            self._testMatmul(x, y, adjoint_a, adjoint_b)
 
 
 def _sparse_tensor_dense_vs_dense_matmul_benchmark_dense(
@@ -132,7 +160,7 @@ def _sparse_tensor_dense_vs_dense_matmul_benchmark_dense(
   t0 = tf.constant(0)
   v0 = tf.constant(0.0)
   def _timeit(iterations, _):
-    (_, final) = control_flow_ops.While(
+    (_, final) = tf.while_loop(
         lambda t, _: t < iterations, body, (t0, v0),
         parallel_iterations=1, back_prop=False)
     return [final]
@@ -152,7 +180,7 @@ def _sparse_tensor_dense_vs_dense_matmul_benchmark_sparse(
   t0 = tf.constant(0)
   v0 = tf.constant(0.0)
   def _timeit(iterations, _):
-    (_, final) = control_flow_ops.While(
+    (_, final) = tf.while_loop(
         lambda t, _: t < iterations, body, (t0, v0),
         parallel_iterations=1, back_prop=False)
     return [final]
@@ -192,7 +220,7 @@ def sparse_tensor_dense_vs_dense_matmul_benchmark(
   else:
     with tf.Session("", config=config, graph=tf.Graph()) as sess:
       if not use_gpu:
-        with tf.device(graph_util.pin_to_cpu):
+        with tf.device("/cpu:0"):
           x_t = tf.constant(x)
           y_t = tf.constant(y)
           ops_fn = _sparse_tensor_dense_vs_dense_matmul_benchmark_dense(
@@ -207,7 +235,7 @@ def sparse_tensor_dense_vs_dense_matmul_benchmark(
   # Using sparse_tensor_dense_matmul.
   with tf.Session("", config=config, graph=tf.Graph()) as sess:
     if not use_gpu:
-      with tf.device(graph_util.pin_to_cpu):
+      with tf.device("/cpu:0"):
         x_ind = tf.constant(np.vstack(np.where(x)).astype(np.int64).T)
         x_val = tf.constant(x[np.where(x)])
         x_shape = tf.constant(np.array(x.shape).astype(np.int64))

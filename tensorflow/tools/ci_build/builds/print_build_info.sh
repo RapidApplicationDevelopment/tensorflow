@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2016 Google Inc. All Rights Reserved.
+# Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@ if [[ ! -z $(which swig) ]]; then
 fi
 
 # Information about TensorFlow source
-TF_FETCH_URL=$(git remote show origin | grep "Fetch URL:" | awk '{print $3}')
+TF_FETCH_URL=$(git config --get remote.origin.url)
 TF_HEAD=$(git rev-parse HEAD)
 
 # NVIDIA & CUDA info

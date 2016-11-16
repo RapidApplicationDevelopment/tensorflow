@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,7 +30,6 @@ namespace {
 class IdentityOpTest : public OpsTestBase {
  protected:
   Status Init(DataType input_type) {
-    RequireDefaultOps();
     TF_CHECK_OK(NodeDefBuilder("op", "Identity")
                     .Input(FakeInput(input_type))
                     .Finalize(node_def()));

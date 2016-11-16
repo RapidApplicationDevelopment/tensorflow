@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "tensorflow/core/framework/allocator.h"
 
+#include "tensorflow/core/framework/log_memory.h"
+#include "tensorflow/core/framework/tracking_allocator.h"
 #include "tensorflow/core/lib/strings/stringprintf.h"
 #include "tensorflow/core/platform/mem.h"
 #include "tensorflow/core/platform/mutex.h"
@@ -41,13 +43,20 @@ string AllocatorStats::DebugString() const {
       this->num_allocs, this->max_alloc_size);
 }
 
+constexpr size_t Allocator::kAllocatorAlignment;
+
 Allocator::~Allocator() {}
 
 // If true, cpu allocator collects more stats.
 static bool cpu_allocator_collect_stats = false;
+// If true, cpu allocator collects full stats.
+static bool cpu_allocator_collect_full_stats = false;
 
 void EnableCPUAllocatorStats(bool enable) {
   cpu_allocator_collect_stats = enable;
+}
+void EnableCPUAllocatorFullStats(bool enable) {
+  cpu_allocator_collect_full_stats = enable;
 }
 
 class CPUAllocator : public Allocator {
@@ -88,6 +97,10 @@ class CPUAllocator : public Allocator {
     *stats = stats_;
   }
 
+  size_t AllocatedSizeSlow(void* ptr) override {
+    return port::MallocExtension_GetAllocatedSize(ptr);
+  }
+
  private:
   mutex mu_;
   AllocatorStats stats_ GUARDED_BY(mu_);
@@ -95,8 +108,18 @@ class CPUAllocator : public Allocator {
   TF_DISALLOW_COPY_AND_ASSIGN(CPUAllocator);
 };
 
+namespace {
+Allocator* MakeCpuAllocator() {
+  Allocator* allocator = new CPUAllocator;
+  if (cpu_allocator_collect_full_stats || LogMemory::IsEnabled()) {
+    allocator = new TrackingAllocator(allocator, true);
+  }
+  return allocator;
+}
+}  // namespace
+
 Allocator* cpu_allocator() {
-  static CPUAllocator* cpu_alloc = new CPUAllocator;
+  static Allocator* cpu_alloc = MakeCpuAllocator();
   return cpu_alloc;
 }
 

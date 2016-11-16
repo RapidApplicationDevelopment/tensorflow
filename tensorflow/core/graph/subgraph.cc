@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -96,7 +96,8 @@ static Status FeedInputs(Graph* g, const DeviceAttributes& device_info,
       if (e->src_output() == id.second) {
         to_remove.emplace_back(e);
       } else if (e->src_output() == Graph::kControlSlot &&
-                 n->def().op() == "Placeholder") {
+                 (n->def().op() == "Placeholder" ||
+                  n->def().op() == "PlaceholderV2")) {
         // When feeding a Placeholder node, any outgoing control edges
         // will be replaced with a control edge from the replacement
         // recv_node.
@@ -156,6 +157,9 @@ static Status PruneForTargets(Graph* g, const subgraph::NameIndex& name_index,
                             not_found);
   }
   PruneForReverseReachability(g, targets);
+
+  // Reconnect nodes with no outgoing edges to the sink node
+  FixupSourceAndSinkEdges(g);
 
   return Status::OK();
 }
@@ -227,7 +231,20 @@ Status RewriteGraphForExecution(
     const gtl::ArraySlice<string>& fetch_outputs,
     const gtl::ArraySlice<string>& target_node_names,
     const DeviceAttributes& device_info) {
-  std::unordered_set<string> endpoints(fed_outputs.begin(), fed_outputs.end());
+  if (fetch_outputs.empty() && target_node_names.empty()) {
+    return errors::InvalidArgument(
+        "Must specify at least one target to fetch or execute.");
+  }
+
+  std::unordered_set<string> endpoints;
+  for (const string& endpoint_name : fed_outputs) {
+    auto result = endpoints.insert(endpoint_name);
+    if (!result.second) {
+      return errors::InvalidArgument("Endpoint \"", endpoint_name,
+                                     "\" fed more than once.");
+    }
+  }
+
   for (const auto& fetch : fetch_outputs) {
     if (endpoints.count(fetch) > 0) {
       return errors::InvalidArgument(fetch, " is both fed and fetched.");

@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -82,7 +82,7 @@ def create_slot(primary, val, name, colocate_with_primary=True):
   # Scope the slot name in the namespace of the primary variable.
   with ops.name_scope(primary.op.name + "/" + name) as scope:
     if colocate_with_primary:
-      with ops.device(primary.device):
+      with ops.colocate_with(primary):
         return _create_slot_var(primary, val, scope)
     else:
       return _create_slot_var(primary, val, scope)

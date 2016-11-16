@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -50,7 +50,6 @@ static void EXPECT_SummaryMatches(const Summary& actual,
 class SummaryImageOpTest : public OpsTestBase {
  protected:
   void MakeOp(int max_images) {
-    RequireDefaultOps();
     TF_ASSERT_OK(NodeDefBuilder("myop", "ImageSummary")
                      .Input(FakeInput())
                      .Input(FakeInput())

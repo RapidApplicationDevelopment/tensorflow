@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,12 +13,13 @@
 # limitations under the License.
 # ==============================================================================
 
-"""Tests for tensorflow.python.ops.attention_ops."""
+"""Tests for image.extract_glimpse()."""
 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import numpy as np
 import tensorflow as tf
 
 
@@ -82,7 +83,7 @@ class ExtractGlimpseTest(tf.test.TestCase):
     glimpse_cols = (tf.transpose(
         tf.image.extract_glimpse(t_cols_4d, t1, t2), [0, 2, 1, 3]))
 
-    # Evaluate the Tensorflow Graph.
+    # Evaluate the TensorFlow Graph.
     with self.test_session() as sess:
       value_rows, value_cols = sess.run([glimpse_rows, glimpse_cols])
 
@@ -112,6 +113,14 @@ class ExtractGlimpseTest(tf.test.TestCase):
                        offsets=[0.0, 0.0],
                        expected_rows=[20, 21, 22],
                        expected_cols=[29, 30, 31, 32, 33])
+
+  def testEmptyTensor(self):
+    empty_image = np.zeros((0, 4, 3, 0))
+    offsets = np.zeros((0, 2))
+    with self.test_session():
+      result = tf.image.extract_glimpse(empty_image, [1, 1], offsets)
+      self.assertAllEqual(np.zeros((0, 1, 1, 0), dtype=np.float32),
+                          result.eval())
 
   def testLargeCenterGlimpse(self):
     self._VerifyValues(tensor_in_sizes=[41, 61],

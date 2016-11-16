@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ from __future__ import print_function
 import tensorflow as tf
 
 from google.protobuf import text_format
-from tensorflow.python.client import graph_util
+from tensorflow.python.framework import graph_util
 
 
 FLAGS = tf.app.flags.FLAGS
@@ -63,11 +63,13 @@ tf.app.flags.DEFINE_string("filename_tensor_name", "save/Const:0",
                            """The name of the tensor holding the save path.""")
 tf.app.flags.DEFINE_boolean("clear_devices", True,
                             """Whether to remove device specifications.""")
+tf.app.flags.DEFINE_string("initializer_nodes", "", "comma separated list of "
+                           "initializer nodes to run before freezing.")
 
 
 def freeze_graph(input_graph, input_saver, input_binary, input_checkpoint,
                  output_node_names, restore_op_name, filename_tensor_name,
-                 output_graph, clear_devices):
+                 output_graph, clear_devices, initializer_nodes):
   """Converts all variables in a graph and checkpoint into constants."""
 
   if not tf.gfile.Exists(input_graph):
@@ -78,7 +80,8 @@ def freeze_graph(input_graph, input_saver, input_binary, input_checkpoint,
     print("Input saver file '" + input_saver + "' does not exist!")
     return -1
 
-  if not tf.gfile.Exists(input_checkpoint):
+  # 'input_checkpoint' may be a prefix if we're using Saver V2 format
+  if not tf.train.checkpoint_exists(input_checkpoint):
     print("Input checkpoint '" + input_checkpoint + "' doesn't exist!")
     return -1
 
@@ -88,11 +91,11 @@ def freeze_graph(input_graph, input_saver, input_binary, input_checkpoint,
 
   input_graph_def = tf.GraphDef()
   mode = "rb" if input_binary else "r"
-  with open(input_graph, mode) as f:
+  with tf.gfile.FastGFile(input_graph, mode) as f:
     if input_binary:
       input_graph_def.ParseFromString(f.read())
     else:
-      text_format.Merge(f.read(), input_graph_def)
+      text_format.Merge(f.read().decode("utf-8"), input_graph_def)
   # Remove all the explicit device specifications for this node. This helps to
   # make the graph more portable.
   if clear_devices:
@@ -102,7 +105,7 @@ def freeze_graph(input_graph, input_saver, input_binary, input_checkpoint,
 
   with tf.Session() as sess:
     if input_saver:
-      with open(input_saver, mode) as f:
+      with tf.gfile.FastGFile(input_saver, mode) as f:
         saver_def = tf.train.SaverDef()
         if input_binary:
           saver_def.ParseFromString(f.read())
@@ -112,10 +115,12 @@ def freeze_graph(input_graph, input_saver, input_binary, input_checkpoint,
         saver.restore(sess, input_checkpoint)
     else:
       sess.run([restore_op_name], {filename_tensor_name: input_checkpoint})
+      if initializer_nodes:
+        sess.run(initializer_nodes)
     output_graph_def = graph_util.convert_variables_to_constants(
         sess, input_graph_def, output_node_names.split(","))
 
-  with tf.gfile.FastGFile(output_graph, "wb") as f:
+  with tf.gfile.GFile(output_graph, "wb") as f:
     f.write(output_graph_def.SerializeToString())
   print("%d ops in the final graph." % len(output_graph_def.node))
 
@@ -124,7 +129,7 @@ def main(unused_args):
   freeze_graph(FLAGS.input_graph, FLAGS.input_saver, FLAGS.input_binary,
                FLAGS.input_checkpoint, FLAGS.output_node_names,
                FLAGS.restore_op_name, FLAGS.filename_tensor_name,
-               FLAGS.output_graph, FLAGS.clear_devices)
+               FLAGS.output_graph, FLAGS.clear_devices, FLAGS.initializer_nodes)
 
 if __name__ == "__main__":
   tf.app.run()

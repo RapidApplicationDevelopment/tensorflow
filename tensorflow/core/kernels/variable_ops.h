@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,6 +25,26 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 
 namespace tensorflow {
+
+// Resource stored by variables in the resource manager.
+class Var : public ResourceBase {
+ public:
+  explicit Var(DataType dtype) : tensor_(dtype) {}
+  mutex* mu() { return &mu_; }
+  Tensor* tensor() { return &tensor_; }
+
+  string DebugString() override {
+    return strings::StrCat(DataTypeString(tensor_.dtype()), "/",
+                           tensor_.shape().DebugString());
+  }
+
+ private:
+  mutex mu_;
+  Tensor tensor_;
+
+  ~Var() override {}
+  TF_DISALLOW_COPY_AND_ASSIGN(Var);
+};
 
 class VariableOp : public OpKernel {
  public:
@@ -59,25 +79,6 @@ class VariableOp : public OpKernel {
   }
 
  private:
-  class Var : public ResourceBase {
-   public:
-    explicit Var(DataType dtype) : tensor_(dtype) {}
-    mutex* mu() { return &mu_; }
-    Tensor* tensor() { return &tensor_; }
-
-    string DebugString() override {
-      return strings::StrCat(DataTypeString(tensor_.dtype()), "/",
-                             tensor_.shape().DebugString());
-    }
-
-   private:
-    mutex mu_;
-    Tensor tensor_;
-
-    ~Var() override {}
-    TF_DISALLOW_COPY_AND_ASSIGN(Var);
-  };
-
   DataType dtype_;
   TensorShape shape_;
 
@@ -156,6 +157,22 @@ class DestroyTemporaryVariableOp : public OpKernel {
 
  private:
   string var_name_;
+};
+
+class IsVariableInitializedOp : public OpKernel {
+ public:
+  IsVariableInitializedOp(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* context) override {
+    // Get a mutable input tensor of the Ref input.
+    const Tensor& input_tensor = context->mutable_input(0, false);
+    Tensor* output = nullptr;
+    OP_REQUIRES_OK(context,
+                   context->allocate_output(0, TensorShape({}), &output));
+    auto output_tensor = output->tensor<bool, 0>();
+    bool result = input_tensor.IsInitialized();
+    output_tensor() = result;
+  }
 };
 
 }  // namespace tensorflow

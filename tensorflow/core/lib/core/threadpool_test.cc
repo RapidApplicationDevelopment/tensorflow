@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ limitations under the License.
 #include <atomic>
 
 #include "tensorflow/core/platform/env.h"
+#include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/test.h"
 #include "tensorflow/core/platform/test_benchmark.h"
 
@@ -50,6 +51,29 @@ TEST(ThreadPool, DoWork) {
         });
       }
     }
+    for (int i = 0; i < kWorkItems; i++) {
+      ASSERT_TRUE(work[i]);
+    }
+  }
+}
+
+TEST(ThreadPool, ParallelFor) {
+  // Make ParallelFor use as many threads as possible.
+  int64 kHugeCost = 1 << 30;
+  for (int num_threads = 1; num_threads < kNumThreads; num_threads++) {
+    fprintf(stderr, "Testing with %d threads\n", num_threads);
+    const int kWorkItems = 15;
+    bool work[kWorkItems];
+    ThreadPool pool(Env::Default(), "test", num_threads);
+    for (int i = 0; i < kWorkItems; i++) {
+      work[i] = false;
+    }
+    pool.ParallelFor(kWorkItems, kHugeCost, [&work](int64 begin, int64 end) {
+      for (int64 i = begin; i < end; ++i) {
+        ASSERT_FALSE(work[i]);
+        work[i] = true;
+      }
+    });
     for (int i = 0; i < kWorkItems; i++) {
       ASSERT_TRUE(work[i]);
     }

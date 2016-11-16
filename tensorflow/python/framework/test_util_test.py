@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import random
 import threading
 
 import numpy as np
@@ -27,12 +28,11 @@ import tensorflow as tf
 from google.protobuf import text_format
 
 from tensorflow.core.framework import graph_pb2
+from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import errors
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import test_util
 from tensorflow.python.platform import googletest
-from tensorflow.python.ops import constant_op
-from tensorflow.python.ops import logging_ops
 
 
 class TestUtilTest(test_util.TensorFlowTestCase):
@@ -166,15 +166,43 @@ class TestUtilTest(test_util.TensorFlowTestCase):
     with self.assertRaisesRegexp(AssertionError, r"Not equal to tolerance"):
       self.assertAllClose(7, 8)
 
+  def testArrayNear(self):
+    a = [1, 2]
+    b = [1, 2, 5]
+    with self.assertRaises(AssertionError):
+      self.assertArrayNear(a, b, 0.001)
+    a = [1, 2]
+    b = [[1, 2], [3, 4]]
+    with self.assertRaises(TypeError):
+      self.assertArrayNear(a, b, 0.001)
+    a = [1, 2]
+    b = [1, 2]
+    self.assertArrayNear(a, b, 0.001)
+
   def testForceGPU(self):
     with self.assertRaisesRegexp(errors.InvalidArgumentError,
                                  "Cannot assign a device to node"):
       with self.test_session(force_gpu=True):
         # this relies on us not having a GPU implementation for assert, which
         # seems sensible
-        x = [True]
+        x = tf.constant(True)
         y = [15]
-        logging_ops.Assert(x, y).run()
+        tf.Assert(x, y).run()
+
+  def testRandomSeed(self):
+    a = random.randint(1, 1000)
+    a_np_rand = np.random.rand(1)
+    with self.test_session():
+      a_rand = tf.random_normal([1]).eval()
+    # ensure that randomness in multiple testCases is deterministic.
+    self.setUp()
+    b = random.randint(1, 1000)
+    b_np_rand = np.random.rand(1)
+    with self.test_session():
+      b_rand = tf.random_normal([1]).eval()
+    self.assertEqual(a, b)
+    self.assertEqual(a_np_rand, b_np_rand)
+    self.assertEqual(a_rand, b_rand)
 
 if __name__ == "__main__":
   googletest.main()

@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ static const float tol_ = 1e-4;
 
 class LRNFloatTest : public OpsTestBase {
  protected:
-  LRNFloatTest() : philox_(123, 17), rand_(&philox_) { RequireDefaultOps(); }
+  LRNFloatTest() : philox_(123, 17), rand_(&philox_) {}
 
   int GetIntAttr(const string& name) {
     int value;

@@ -96,10 +96,10 @@ sess = tf.Session()
 # All inputs needed by the op are run automatically by the session.  They
 # typically are run in parallel.
 #
-# The call 'run(product)' thus causes the execution of threes ops in the
+# The call 'run(product)' thus causes the execution of three ops in the
 # graph: the two constants and matmul.
 #
-# The output of the op is returned in 'result' as a numpy `ndarray` object.
+# The output of the matmul is returned in 'result' as a numpy `ndarray` object.
 result = sess.run(product)
 print(result)
 # ==> [[ 12.]]
@@ -145,6 +145,35 @@ Devices are specified with strings.  The currently supported devices are:
 
 See [Using GPUs](../how_tos/using_gpu/index.md) for more information about GPUs
 and TensorFlow.
+
+### Launching the graph in a distributed session
+
+To create a TensorFlow cluster, launch a TensorFlow server on each of the
+machines in the cluster. When you instantiate a Session in your client, you
+pass it the network location of one of the machines in the cluster:
+
+```python
+with tf.Session("grpc://example.org:2222") as sess:
+  # Calls to sess.run(...) will be executed on the cluster.
+  ...
+```
+
+This machine becomes the master for the session. The master distributes the
+graph across other machines in the cluster (workers), much as the local
+implementation distributes the graph across available compute resources within
+a machine.
+
+You can use "with tf.device():" statements to directly specify workers for
+particular parts of the graph:
+
+```python
+with tf.device("/job:ps/task:0"):
+  weights = tf.Variable(...)
+  biases = tf.Variable(...)
+```
+
+See the [Distributed TensorFlow How To](../how_tos/distributed/) for more
+information about distributed sessions and clusters.
 
 ## Interactive Usage
 
@@ -207,7 +236,7 @@ update = tf.assign(state, new_value)
 
 # Variables must be initialized by running an `init` Op after having
 # launched the graph.  We first have to add the `init` Op to the graph.
-init_op = tf.initialize_all_variables()
+init_op = tf.global_variables_initializer()
 
 # Launch the graph and run the ops.
 with tf.Session() as sess:
@@ -245,9 +274,9 @@ example we fetched the single node `state`, but you can also fetch multiple
 tensors:
 
 ```python
-input1 = tf.constant(3.0)
-input2 = tf.constant(2.0)
-input3 = tf.constant(5.0)
+input1 = tf.constant([3.0])
+input2 = tf.constant([2.0])
+input3 = tf.constant([5.0])
 intermed = tf.add(input2, input3)
 mul = tf.mul(input1, intermed)
 
@@ -290,6 +319,6 @@ with tf.Session() as sess:
 A `placeholder()` operation generates an error if you do not supply a feed for
 it. See the
 [MNIST fully-connected feed tutorial](../tutorials/mnist/tf/index.md)
-([source code](https://www.tensorflow.org/code/tensorflow/g3doc/tutorials/mnist/fully_connected_feed.py))
+([source code](https://www.tensorflow.org/code/tensorflow/examples/tutorials/mnist/fully_connected_feed.py))
 for a larger-scale example of feeds.
 

@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -129,10 +129,7 @@ class SerializeManySparseOp : public OpKernel {
     Tensor serialized_sparse(DT_STRING, TensorShape({N, 3}));
     auto serialized_sparse_t = serialized_sparse.matrix<string>();
 
-    OP_REQUIRES(context, input_st.IndicesValid(),
-                errors::InvalidArgument("Input SparseTensor fails check for "
-                                        "lexicographic ordering of indices.  "
-                                        "Cannot split."));
+    OP_REQUIRES_OK(context, input_st.IndicesValid());
 
     // We can generate the output shape proto string now, for all
     // minibatch entries.

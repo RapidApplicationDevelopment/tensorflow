@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -65,6 +65,7 @@ Status PaddingFIFOQueue::GetElementComponent(
 }
 
 void PaddingFIFOQueue::TryDequeueMany(int num_elements, OpKernelContext* ctx,
+                                      bool allow_small_batch,
                                       CallbackWithTuple callback) {
   if (num_elements == 0) {
     Tuple tuple;
@@ -93,16 +94,12 @@ void PaddingFIFOQueue::TryDequeueMany(int num_elements, OpKernelContext* ctx,
       // TODO(josh11b): This makes two copies of callback, avoid this if possible.
       dequeue_attempts_.emplace_back(
           num_elements, [callback]() { callback(Tuple()); }, ctx, cm, token,
-          [callback, this](Attempt* attempt) EXCLUSIVE_LOCKS_REQUIRED(mu_) {
-            int32 s = queues_[0].size();
-            if (closed_ && s < attempt->elements_requested) {
-              attempt->context->SetStatus(errors::OutOfRange(
-                  "PaddingFIFOQueue '", name_, "' is closed and has ",
-                  "insufficient elements (requested ",
-                  attempt->elements_requested, ", current size ", s, ")"));
-
-              // TODO(mrry): Add support for producing a partial batch as
-              // output when the queue is closed.
+          [callback, allow_small_batch,
+           this](Attempt* attempt) EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+            int32 queue_size = queues_[0].size();
+            if (closed_ && queue_size < attempt->elements_requested) {
+              // If we don't have enough for a full dequeue, we have
+              // to reset the attempt tuple.
               if (!attempt->tuples.empty()) {
                 // Restore already-dequeued elements to the front of the queue.
                 for (int64 i = attempt->tuples.size() - 1; i >= 0; --i) {
@@ -121,11 +118,31 @@ void PaddingFIFOQueue::TryDequeueMany(int num_elements, OpKernelContext* ctx,
                   }
                 }
               }
-              return kComplete;
+              if (allow_small_batch && queues_[0].size() > 0) {
+                // Request all remaining elements in the queue.
+                queue_size = queues_[0].size();
+                attempt->tuples.clear();
+                attempt->elements_requested = queue_size;
+              } else {
+                if (allow_small_batch) {
+                  // There may be some enqueue attempts containing
+                  // values.  If so, we'll yield and wait for them
+                  // to add elements to the queue.
+                  if (!enqueue_attempts_.empty()) return kProgress;
+                }
+                if (attempt->context->status().ok()) {
+                  attempt->context->SetStatus(errors::OutOfRange(
+                      "PaddingFIFOQueue '", name_, "' is closed and has ",
+                      "insufficient elements (requested ",
+                      attempt->elements_requested, ", current size ",
+                      queue_size, ")"));
+                }
+                return kComplete;
+              }
             }
 
             RunResult result = kNoProgress;
-            for (; s > 0; --s) {
+            for (; queue_size > 0; --queue_size) {
               result = kProgress;
               Tuple tuple;
               DequeueLocked(attempt->context, &tuple);
@@ -266,9 +283,8 @@ Status PaddingFIFOQueue::MatchesNodeDef(const NodeDef& node_def) {
   return Status::OK();
 }
 
-template <typename T, int NDIMS>
-Status HandleElementToLargerSlice(const Tensor& element, Tensor* parent,
-                                  int index) {
+static Status ValidateElementToLargerSlice(const Tensor& element,
+                                           Tensor* parent) {
   DCHECK_NE(parent->dim_size(0), 0);
   if (element.NumElements() > (parent->NumElements() / parent->dim_size(0))) {
     TensorShape chip_shape = parent->shape();
@@ -278,6 +294,19 @@ Status HandleElementToLargerSlice(const Tensor& element, Tensor* parent,
         "element is greater than number of elements in parent slice.  ",
         "Shapes are: [element]: ", element.shape().DebugString(),
         ", [parent slice]: ", chip_shape.DebugString());
+  }
+  return Status::OK();
+}
+
+template <typename T, int NDIMS>
+Status HandleElementToLargerSlice(const Tensor& element, Tensor* parent,
+                                  int index) {
+  Status s = ValidateElementToLargerSlice(element, parent);
+  if (!s.ok()) {
+    return s;
+  }
+  if (element.NumElements() == 0) {
+    return Status::OK();
   }
   auto element_t = element.tensor<T, NDIMS>();
   auto parent_t = parent->tensor<T, NDIMS + 1>();

@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,22 +29,27 @@ typedef Eigen::GpuDevice GPUDevice;
 // Partial specialization for a GPUDevice, that uses the Eigen implementation
 // from XentEigenImpl.
 namespace functor {
-template <typename T>
-struct SparseXentFunctor<GPUDevice, T> {
+template <typename T, typename Index>
+struct SparseXentFunctor<GPUDevice, T, Index> {
   void operator()(const GPUDevice& d, typename TTypes<T>::ConstMatrix logits,
-                  typename TTypes<int64>::ConstVec labels,
-                  typename TTypes<T>::Vec scratch,
-                  typename TTypes<T>::Vec loss,
+                  typename TTypes<Index>::ConstVec labels,
+                  typename TTypes<T>::Vec scratch, typename TTypes<T>::Vec loss,
                   typename TTypes<T>::Matrix backprop) {
-    SparseXentEigenImpl<GPUDevice, T>::Compute(d, logits, labels, scratch, loss,
-                                               backprop);
+    SparseXentEigenImpl<GPUDevice, T, Index>::Compute(d, logits, labels,
+                                                      scratch, loss, backprop);
   }
 };
 }  // end namespace functor
 
 // Instantiate the GPU implementation for float.
-template struct functor::SparseXentFunctor<GPUDevice, float>;
-template class generator::SparseXentGradGenerator<float>;
+#define REGISTER(Index)                                                      \
+  template struct functor::SparseXentFunctor<GPUDevice, float, Index>;       \
+  template class generator::SparseXentGradGenerator<float, Index>;           \
+  template struct functor::SparseXentFunctor<GPUDevice, Eigen::half, Index>; \
+  template class generator::SparseXentGradGenerator<Eigen::half, Index>;
+REGISTER(int32)
+REGISTER(int64)
+#undef REGISTER
 
 }  // end namespace tensorflow
 

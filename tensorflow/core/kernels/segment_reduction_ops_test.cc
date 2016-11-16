@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -115,7 +115,6 @@ BM_Reduce_Arg(4096, 128, 2);
 
 static void SparseSegmentMeanGradHelper(int iters, float uniqueness, int size) {
   testing::StopTiming();
-  RequireDefaultOps();
   Graph* g = new Graph(OpRegistry::Global());
   CHECK_LE(uniqueness, 1.0);
   CHECK_GT(uniqueness, 0.0);

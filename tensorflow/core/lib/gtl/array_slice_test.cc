@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -655,6 +655,10 @@ TEST(MutableCharSlice, StringConversion) {
   // since in that case both overloads would be feasible.
   string str;
   EXPECT_TRUE(TestMutableOverload(&str));
+
+  // Avoid warning "unused function 'TestMutableOverload'"
+  int a[1];
+  EXPECT_FALSE(TestMutableOverload(a));
 }
 
 }  // namespace

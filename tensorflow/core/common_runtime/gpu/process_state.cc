@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,11 +22,14 @@ limitations under the License.
 #include "tensorflow/core/common_runtime/gpu/gpu_init.h"
 #include "tensorflow/core/common_runtime/gpu/pool_allocator.h"
 #include "tensorflow/core/framework/allocator.h"
+#include "tensorflow/core/framework/log_memory.h"
+#include "tensorflow/core/framework/tracking_allocator.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/stream_executor.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/util/env_var.h"
 
 // If these flags need to be runtime configurable, consider adding
 // options to ConfigProto.
@@ -82,9 +85,10 @@ ProcessState::MemDesc ProcessState::PtrType(const void* ptr) {
   return MemDesc();
 }
 
-Allocator* ProcessState::GetGPUAllocator(int gpu_id, size_t total_bytes,
-                                         const string& allocator_type) {
+Allocator* ProcessState::GetGPUAllocator(const GPUOptions& options, int gpu_id,
+                                         size_t total_bytes) {
 #if GOOGLE_CUDA
+  const string& allocator_type = options.allocator_type();
   mutex_lock lock(mu_);
   gpu::Platform* gpu_platform = GPUMachineManager();
 
@@ -106,7 +110,7 @@ Allocator* ProcessState::GetGPUAllocator(int gpu_id, size_t total_bytes,
       return nullptr;
     }
 
-    gpu_allocator = new GPUBFCAllocator(gpu_id, total_bytes);
+    gpu_allocator = new GPUBFCAllocator(gpu_id, total_bytes, options);
 
     // If true, checks for memory overwrites by writing
     // distinctive patterns on both ends of allocated memory.
@@ -122,7 +126,7 @@ Allocator* ProcessState::GetGPUAllocator(int gpu_id, size_t total_bytes,
     gpu::StreamExecutor* se =
         gpu_platform->ExecutorForDevice(gpu_id).ValueOrDie();
     int bus_id = se->GetDeviceDescription().numa_node();
-    if (bus_id < static_cast<int64>(gpu_visitors_.size())) {
+    if (bus_id >= 0 && bus_id < static_cast<int64>(gpu_visitors_.size())) {
       for (auto v : gpu_visitors_[bus_id]) {
         gpu_allocators_[gpu_id]->AddAllocVisitor(v);
       }
@@ -155,9 +159,15 @@ Allocator* ProcessState::GetCPUAllocator(int numa_node) {
   numa_node = 0;
   mutex_lock lock(mu_);
   while (cpu_allocators_.size() <= static_cast<size_t>(numa_node)) {
-    cpu_allocators_.push_back(new PoolAllocator(
-        100 /*pool_size_limit*/, true /*auto_resize*/, new BasicCPUAllocator(),
-        new NoopRounder, "cpu_pool"));
+    Allocator* allocator =
+        new PoolAllocator(100 /*pool_size_limit*/, true /*auto_resize*/,
+                          new BasicCPUAllocator(), new NoopRounder, "cpu_pool");
+    if (LogMemory::IsEnabled()) {
+      // Wrap the allocator to track allocation ids for better logging
+      // at the cost of performance.
+      allocator = new TrackingAllocator(allocator, true);
+    }
+    cpu_allocators_.push_back(allocator);
   }
   return cpu_allocators_[0];
 }
@@ -172,15 +182,51 @@ Allocator* ProcessState::GetCUDAHostAllocator(int numa_node) {
   // different numa_nodes.  For now, just one.
   numa_node = 0;
   mutex_lock lock(mu_);
+
+  // Find the first valid StreamExecutor to request CUDA host memory
+  // through, since any will work.
+  //
+  // This search isn't super clean, and it would be nice to use a
+  // better source of information about which executor to use.  For
+  // example, process_state could maybe save the first stream executor
+  // it knows is valid.
+  gpu::StreamExecutor* se = nullptr;
+  for (size_t i = 0; i < gpu_allocators_.size(); ++i) {
+    if (gpu_allocators_[i] != nullptr) {
+      se = GPUMachineManager()->ExecutorForDevice(i).ValueOrDie();
+      break;
+    }
+  }
+
+  CHECK_NE(nullptr, se);
+
   while (static_cast<int>(cuda_host_allocators_.size()) <= numa_node) {
-    // CUDAHost alloc the same across all gpus, so just get the
-    // executor for the first device.
-    gpu::Platform* gpu_platform = GPUMachineManager();
-    gpu::StreamExecutor* se = gpu_platform->ExecutorForDevice(0).ValueOrDie();
-    CHECK(se);
-    cuda_host_allocators_.push_back(new PoolAllocator(
-        100 /*pool_size_limit*/, true /*auto_resize*/,
-        new CUDAHostAllocator(se), new Pow2Rounder, "cuda_host"));
+    Allocator* allocator = nullptr;
+    static constexpr bool kCudaHostMemoryUseBFC = true;
+    if (kCudaHostMemoryUseBFC) {
+      // TODO(zheng-xq): evaluate whether 64GB by default is the best choice.
+      int64 cuda_host_mem_limit_in_mb = -1;
+      Status status = ReadInt64FromEnvVar("TF_CUDA_HOST_MEM_LIMIT_IN_MB",
+                                          1LL << 16 /*64GB max by default*/,
+                                          &cuda_host_mem_limit_in_mb);
+      if (!status.ok()) {
+        LOG(ERROR) << "GetCUDAHostAllocator: " << status.error_message();
+      }
+      int64 cuda_host_mem_limit = cuda_host_mem_limit_in_mb * (1LL << 20);
+      allocator =
+          new BFCAllocator(new CUDAHostAllocator(se), cuda_host_mem_limit,
+                           true /*allow_growth*/, "cuda_host_bfc" /*name*/);
+    } else {
+      allocator = new PoolAllocator(
+          100 /*pool_size_limit*/, true /*auto_resize*/,
+          new CUDAHostAllocator(se), new Pow2Rounder, "cuda_host");
+    }
+    if (LogMemory::IsEnabled()) {
+      // Wrap the allocator to track allocation ids for better logging
+      // at the cost of performance.
+      allocator = new TrackingAllocator(allocator, true);
+    }
+    cuda_host_allocators_.push_back(allocator);
     if (FLAGS_brain_gpu_record_mem_types) {
       MemDesc md;
       md.loc = MemDesc::CPU;
@@ -204,7 +250,7 @@ void ProcessState::AddGPUAllocVisitor(int bus_id, AllocVisitor visitor) {
     gpu::StreamExecutor* se =
         gpu_platform->ExecutorForDevice(gpu_id).ValueOrDie();
     if (gpu_allocators_[gpu_id] &&
-        se->GetDeviceDescription().numa_node() == bus_id) {
+        (se->GetDeviceDescription().numa_node() + 1) == bus_id) {
       gpu_allocators_[gpu_id]->AddAllocVisitor(visitor);
     }
   }

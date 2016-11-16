@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,16 +22,16 @@ import os
 import re
 import sys
 
-from setuptools import find_packages, setup, Command, Extension
+from setuptools import find_packages, setup, Command
 from setuptools.command.install import install as InstallCommandBase
 from setuptools.dist import Distribution
 
-_VERSION = '0.7.0'
+_VERSION = '0.11.0'
 
 REQUIRED_PACKAGES = [
-    'numpy >= 1.8.2',
+    'numpy >= 1.11.0',
     'six >= 1.10.0',
-    'protobuf == 3.0.0b2',
+    'protobuf == 3.1.0',
 ]
 
 # python3 requires wheel 0.26
@@ -39,7 +39,8 @@ if sys.version_info.major == 3:
   REQUIRED_PACKAGES.append('wheel >= 0.26')
 else:
   REQUIRED_PACKAGES.append('wheel')
-
+  # mock comes with unittest.mock for python3, need to install for python2
+  REQUIRED_PACKAGES.append('mock >= 2.0.0')
 
 # pylint: disable=line-too-long
 CONSOLE_SCRIPTS = [
@@ -52,8 +53,8 @@ TEST_PACKAGES = [
 ]
 
 class BinaryDistribution(Distribution):
-  def is_pure(self):
-    return False
+  def has_ext_modules(self):
+    return True
 
 
 class InstallCommand(InstallCommandBase):
@@ -99,21 +100,16 @@ class InstallHeaders(Command):
     # directories for -I
     install_dir = re.sub('/google/protobuf/src', '', install_dir)
 
-    # Copy eigen code into tensorflow/include,
-    # tensorflow/include/external/eigen_archive/eigen-eigen-<revision>,
-    # and tensorflow/include/eigen-eigen-<revision>.
+    # Copy eigen code into tensorflow/include.
     # A symlink would do, but the wheel file that gets created ignores
     # symlink within the directory hierarchy.
     # NOTE(keveman): Figure out how to customize bdist_wheel package so
     # we can do the symlink.
-    if re.search(r'(external/eigen_archive/eigen-eigen-\w+)', install_dir):
-      extra_dirs = [re.sub('/external/eigen_archive', '', install_dir),
-                    re.sub(r'external/eigen_archive/eigen-eigen-\w+', '',
-                           install_dir)]
-      for extra_dir in extra_dirs:
-        if not os.path.exists(extra_dir):
-          self.mkpath(extra_dir)
-        self.copy_file(header, extra_dir)
+    if 'external/eigen_archive/' in install_dir:
+      extra_dir = install_dir.replace('external/eigen_archive', '')
+      if not os.path.exists(extra_dir):
+        self.mkpath(extra_dir)
+      self.copy_file(header, extra_dir)
 
     if not os.path.exists(install_dir):
       self.mkpath(install_dir)
@@ -145,6 +141,10 @@ def find_files(pattern, root):
 
 matches = ['../' + x for x in find_files('*', 'external') if '.py' not in x]
 
+if os.name == 'nt':
+  EXTENSION_NAME = 'python/_pywrap_tensorflow.pyd'
+else:
+  EXTENSION_NAME = 'python/_pywrap_tensorflow.so'
 
 headers = (list(find_files('*.h', 'tensorflow/core')) +
            list(find_files('*.h', 'google/protobuf/src')) +
@@ -171,11 +171,12 @@ setup(
     # Add in any packaged data.
     include_package_data=True,
     package_data={
-        'tensorflow': ['python/_pywrap_tensorflow.so',
-                       'core/libtensorflow_framework.so',
+        'tensorflow': [EXTENSION_NAME,
+                       'tensorboard/dist/bazel-html-imports.html',
                        'tensorboard/dist/index.html',
                        'tensorboard/dist/tf-tensorboard.html',
                        'tensorboard/lib/css/global.css',
+                       'tensorboard/TAG',
                      ] + matches,
     },
     zip_safe=False,

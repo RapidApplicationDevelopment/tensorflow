@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import os
 
 import tensorflow as tf
 
-from tensorflow.models.embedding import word2vec as word2vec
+from tensorflow.models.embedding import word2vec
 
 flags = tf.app.flags
 
@@ -33,8 +33,8 @@ FLAGS = flags.FLAGS
 class Word2VecTest(tf.test.TestCase):
 
   def setUp(self):
-    FLAGS.train_data = os.path.join(self.get_temp_dir() + "test-text.txt")
-    FLAGS.eval_data = os.path.join(self.get_temp_dir() + "eval-text.txt")
+    FLAGS.train_data = os.path.join(self.get_temp_dir(), "test-text.txt")
+    FLAGS.eval_data = os.path.join(self.get_temp_dir(), "eval-text.txt")
     FLAGS.save_path = self.get_temp_dir()
     with open(FLAGS.train_data, "w") as f:
       f.write(

@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -64,11 +64,19 @@ class DecodePngOp : public OpKernel {
         png::CommonInitDecode(data, channels_, desired_channel_bits_, &decode),
         errors::InvalidArgument("Invalid PNG header, data size ", data.size()));
 
-    // Verify that width and height don't overflow int
-    const int width = decode.width;
-    const int height = decode.height;
-    if (width != static_cast<int64>(decode.width) ||
-        height != static_cast<int64>(decode.height)) {
+    // Verify that width and height are not too large:
+    // - verify width and height don't overflow int.
+    // - width can later be multiplied by channels_ and sizeof(uint16), so
+    //   verify single dimension is not too large.
+    // - verify when width and height are multiplied together, there are a few
+    //   bits to spare as well.
+    const int width = static_cast<int>(decode.width);
+    const int height = static_cast<int>(decode.height);
+    const int64 total_size =
+        static_cast<int64>(width) * static_cast<int64>(height);
+    if (width != static_cast<int64>(decode.width) || width <= 0 ||
+        width >= (1LL << 27) || height != static_cast<int64>(decode.height) ||
+        height <= 0 || height >= (1LL << 27) || total_size >= (1LL << 29)) {
       png::CommonFreeDecode(&decode);
       OP_REQUIRES(context, false,
                   errors::InvalidArgument("PNG size too large for int: ",

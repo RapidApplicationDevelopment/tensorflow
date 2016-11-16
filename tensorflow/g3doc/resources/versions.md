@@ -39,7 +39,7 @@ versions.  The public API consists of
 
 * The following protocol buffer files:
   [`attr_value`](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/framework/attr_value.proto),
-  [`config`](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/framework/config.proto),
+  [`config`](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/protobuf/config.proto),
   [`event`](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/util/event.proto),
   [`graph`](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/framework/graph.proto),
   [`op_def`](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/framework/op_def.proto),
@@ -133,6 +133,10 @@ support for versions 4 to 7, leaving version 8 only.
 Finally, when support for a `GraphDef` version is dropped, we will attempt to
 provide tools for automatically converting graphs to a newer supported
 `GraphDef` version.
+
+For developer-level details about `GraphDef` versioning, including how to evolve
+the versions to account for changes, see [TensorFlow Data
+Versioning](data_versions.md).
 
 
 ## C++ API Compatibility

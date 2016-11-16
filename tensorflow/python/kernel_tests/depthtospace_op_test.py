@@ -1,4 +1,4 @@
-# Copyright 2016 Google Inc. All Rights Reserved.
+# Copyright 2016 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,12 +25,16 @@ import tensorflow as tf
 
 class DepthToSpaceTest(tf.test.TestCase):
 
+  def _testOne(self, inputs, block_size, outputs):
+    with self.test_session(use_gpu=True):
+      x_tf = tf.depth_to_space(tf.to_float(inputs), block_size)
+      self.assertAllEqual(x_tf.eval(), outputs)
+
   def testBasic(self):
     x_np = [[[[1, 2, 3, 4]]]]
-    with self.test_session(use_gpu=False):
-      block_size = 2
-      x_tf = tf.depth_to_space(x_np, block_size)
-      self.assertAllEqual(x_tf.eval(), [[[[1], [2]], [[3], [4]]]])
+    block_size = 2
+    x_out = [[[[1], [2]], [[3], [4]]]]
+    self._testOne(x_np, block_size, x_out)
 
   # Tests for larger input dimensions. To make sure elements are
   # correctly ordered spatially.
@@ -40,12 +44,28 @@ class DepthToSpaceTest(tf.test.TestCase):
              [[9, 10, 11, 12],
               [13, 14, 15, 16]]]]
     block_size = 2
-    with self.test_session(use_gpu=False):
-      x_tf = tf.depth_to_space(x_np, block_size)
-      self.assertAllEqual(x_tf.eval(), [[[[1], [2], [5], [6]],
-                                         [[3], [4], [7], [8]],
-                                         [[9], [10], [13], [14]],
-                                         [[11], [12], [15], [16]]]])
+    x_out = [[[[1], [2], [5], [6]],
+              [[3], [4], [7], [8]],
+              [[9], [10], [13], [14]],
+              [[11], [12], [15], [16]]]]
+    self._testOne(x_np, block_size, x_out)
+
+  def testBlockSize2Batch10(self):
+    block_size = 2
+    def batch_input_elt(i):
+      return [[[1 * i, 2 * i, 3 * i, 4 * i],
+               [5 * i, 6 * i, 7 * i, 8 * i]],
+              [[9 * i, 10 * i, 11 * i, 12 * i],
+               [13 * i, 14 * i, 15 * i, 16 * i]]]
+    def batch_output_elt(i):
+      return [[[1 * i], [2 * i], [5 * i], [6 * i]],
+              [[3 * i], [4 * i], [7 * i], [8 * i]],
+              [[9 * i], [10 * i], [13 * i], [14 * i]],
+              [[11 * i], [12 * i], [15 * i], [16 * i]]]
+    batch_size = 10
+    x_np = [batch_input_elt(i) for i in range(batch_size)]
+    x_out = [batch_output_elt(i) for i in range(batch_size)]
+    self._testOne(x_np, block_size, x_out)
 
   # Tests for different width and height.
   def testNonSquare(self):
@@ -53,46 +73,42 @@ class DepthToSpaceTest(tf.test.TestCase):
              [[5, 50, 6, 60, 7, 70, 8, 80]],
              [[9, 90, 10, 100, 11, 110, 12, 120]]]]
     block_size = 2
-    with self.test_session(use_gpu=False):
-      x_tf = tf.depth_to_space(x_np, block_size)
-      self.assertAllEqual(x_tf.eval(), [[[[1, 10], [2, 20]],
-                                         [[3, 30], [4, 40]],
-                                         [[5, 50], [6, 60]],
-                                         [[7, 70], [8, 80]],
-                                         [[9, 90], [10, 100]],
-                                         [[11, 110], [12, 120]]]])
+    x_out = [[[[1, 10], [2, 20]],
+              [[3, 30], [4, 40]],
+              [[5, 50], [6, 60]],
+              [[7, 70], [8, 80]],
+              [[9, 90], [10, 100]],
+              [[11, 110], [12, 120]]]]
+    self._testOne(x_np, block_size, x_out)
 
   # Tests for larger input dimensions. To make sure elements are
   # correctly ordered spatially.
   def testBlockSize4FlatInput(self):
     x_np = [[[[1, 2, 5, 6, 3, 4, 7, 8, 9, 10, 13, 14, 11, 12, 15, 16]]]]
     block_size = 4
-    with self.test_session(use_gpu=False):
-      x_tf = tf.depth_to_space(x_np, block_size)
-      self.assertAllEqual(x_tf.eval(), [[[[1], [2], [5], [6]],
-                                         [[3], [4], [7], [8]],
-                                         [[9], [10], [13], [14]],
-                                         [[11], [12], [15], [16]]]])
+    x_out = [[[[1], [2], [5], [6]],
+              [[3], [4], [7], [8]],
+              [[9], [10], [13], [14]],
+              [[11], [12], [15], [16]]]]
+    self._testOne(x_np, block_size, x_out)
 
   # Tests for larger input depths.
   # To make sure elements are properly interleaved in depth.
   def testDepthInterleaved(self):
     x_np = [[[[1, 10, 2, 20, 3, 30, 4, 40]]]]
     block_size = 2
-    with self.test_session(use_gpu=False):
-      x_tf = tf.depth_to_space(x_np, block_size)
-      self.assertAllEqual(x_tf.eval(), [[[[1, 10], [2, 20]],
-                                         [[3, 30], [4, 40]]]])
+    x_out = [[[[1, 10], [2, 20]],
+              [[3, 30], [4, 40]]]]
+    self._testOne(x_np, block_size, x_out)
 
   # Tests for larger input depths. Here an odd depth.
   # To make sure elements are properly interleaved in depth.
   def testDepthInterleavedDepth3(self):
     x_np = [[[[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]]]
     block_size = 2
-    with self.test_session(use_gpu=False):
-      x_tf = tf.depth_to_space(x_np, block_size)
-      self.assertAllEqual(x_tf.eval(), [[[[1, 2, 3], [4, 5, 6]],
-                                         [[7, 8, 9], [10, 11, 12]]]])
+    x_out = [[[[1, 2, 3], [4, 5, 6]],
+              [[7, 8, 9], [10, 11, 12]]]]
+    self._testOne(x_np, block_size, x_out)
 
   # Tests for larger input depths.
   # To make sure elements are properly interleaved in depth.
@@ -102,13 +118,11 @@ class DepthToSpaceTest(tf.test.TestCase):
              [[9, 90, 10, 100, 11, 110, 12, 120],
               [13, 130, 14, 140, 15, 150, 16, 160]]]]
     block_size = 2
-    with self.test_session(use_gpu=False):
-      x_tf = tf.depth_to_space(x_np, block_size)
-      self.assertAllEqual(x_tf.eval(),
-                          [[[[1, 10], [2, 20], [5, 50], [6, 60]],
-                            [[3, 30], [4, 40], [7, 70], [8, 80]],
-                            [[9, 90], [10, 100], [13, 130], [14, 140]],
-                            [[11, 110], [12, 120], [15, 150], [16, 160]]]])
+    x_out = [[[[1, 10], [2, 20], [5, 50], [6, 60]],
+              [[3, 30], [4, 40], [7, 70], [8, 80]],
+              [[9, 90], [10, 100], [13, 130], [14, 140]],
+              [[11, 110], [12, 120], [15, 150], [16, 160]]]]
+    self._testOne(x_np, block_size, x_out)
 
   # Error handling:
 
@@ -122,7 +136,7 @@ class DepthToSpaceTest(tf.test.TestCase):
     block_size = 4
     # Raise an exception, since th depth is only 4 and needs to be
     # divisible by 16.
-    with self.assertRaises(IndexError):
+    with self.assertRaises(ValueError):
       out_tf = tf.depth_to_space(x_np, block_size)
       out_tf.eval()
 
@@ -151,19 +165,23 @@ class DepthToSpaceTest(tf.test.TestCase):
     x_np = [[[[1], [2]],
              [[3], [4]]]]
     block_size = 10
-    with self.assertRaises(IndexError):
+    with self.assertRaises(ValueError):
       out_tf = tf.space_to_depth(x_np, block_size)
       out_tf.eval()
 
   def testBlockSizeNotDivisibleDepth(self):
-    # The the depth is not divisible by the square of the block size.
+    # The depth is not divisible by the square of the block size.
     x_np = [[[[1, 1, 1, 1],
               [2, 2, 2, 2]],
              [[3, 3, 3, 3],
               [4, 4, 4, 4]]]]
     block_size = 3
-    with self.assertRaises(IndexError):
+    with self.assertRaises(ValueError):
       _ = tf.space_to_depth(x_np, block_size)
+
+  def testUnknownShape(self):
+    t = tf.depth_to_space(tf.placeholder(tf.float32), block_size=4)
+    self.assertEqual(4, t.get_shape().ndims)
 
 
 class DepthToSpaceGradientTest(tf.test.TestCase):
@@ -171,7 +189,7 @@ class DepthToSpaceGradientTest(tf.test.TestCase):
   # Check the gradients.
   def _checkGrad(self, x, block_size):
     assert 4 == x.ndim
-    with self.test_session():
+    with self.test_session(use_gpu=True):
       tf_x = tf.convert_to_tensor(x)
       tf_y = tf.depth_to_space(tf_x, block_size)
       epsilon = 1e-2
@@ -204,6 +222,7 @@ class DepthToSpaceGradientTest(tf.test.TestCase):
   def testSmall2(self):
     block_size = 3
     self._compare(1, 2, 3, 2, block_size)
+
 
 if __name__ == "__main__":
   tf.test.main()

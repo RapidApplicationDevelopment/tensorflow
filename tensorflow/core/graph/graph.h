@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -106,23 +106,45 @@ class Node {
   bool IsOp() const { return id() > 1; }
 
   // Node class helpers
-  bool IsSwitch() const { return (class_ == NC_SWITCH); }
-  bool IsMerge() const { return (class_ == NC_MERGE); }
-  bool IsEnter() const { return (class_ == NC_ENTER); }
-  bool IsExit() const { return (class_ == NC_EXIT); }
-  bool IsNextIteration() const { return (class_ == NC_NEXT_ITERATION); }
-  bool IsLoopCond() const { return (class_ == NC_LOOP_COND); }
-  bool IsControlTrigger() const { return (class_ == NC_CONTROL_TRIGGER); }
-  bool IsSend() const { return (class_ == NC_SEND); }
-  bool IsRecv() const { return (class_ == NC_RECV); }
-  bool IsConstant() const { return (class_ == NC_CONSTANT); }
-  bool IsVariable() const { return (class_ == NC_VARIABLE); }
-  bool IsIdentity() const { return (class_ == NC_IDENTITY); }
+  bool IsSwitch() const { return class_ == NC_SWITCH; }
+  bool IsMerge() const { return class_ == NC_MERGE; }
+  bool IsEnter() const { return class_ == NC_ENTER; }
+  bool IsExit() const { return class_ == NC_EXIT; }
+  bool IsNextIteration() const { return class_ == NC_NEXT_ITERATION; }
+  bool IsLoopCond() const { return class_ == NC_LOOP_COND; }
+  bool IsControlTrigger() const { return class_ == NC_CONTROL_TRIGGER; }
+  bool IsSend() const { return class_ == NC_SEND || class_ == NC_HOST_SEND; }
+  bool IsRecv() const { return class_ == NC_RECV || class_ == NC_HOST_RECV; }
+  bool IsConstant() const { return class_ == NC_CONSTANT; }
+  bool IsVariable() const { return class_ == NC_VARIABLE; }
+  bool IsIdentity() const { return class_ == NC_IDENTITY; }
+  bool IsGetSessionHandle() const { return class_ == NC_GET_SESSION_HANDLE; }
+  bool IsGetSessionTensor() const { return class_ == NC_GET_SESSION_TENSOR; }
+  bool IsDeleteSessionTensor() const {
+    return class_ == NC_DELETE_SESSION_TENSOR;
+  }
   bool IsControlFlow() const {
     return (class_ != NC_OTHER) &&  // Fast path
            (IsSwitch() || IsMerge() || IsEnter() || IsExit() ||
             IsNextIteration());
   }
+  bool IsHostSend() const { return class_ == NC_HOST_SEND; }
+  bool IsHostRecv() const { return class_ == NC_HOST_RECV; }
+
+  template <typename T>
+  void AddAttr(const string& name, const T& val) {
+    MaybeCopyOnWrite();
+    SetAttrValue(val, &((*props_->node_def_.mutable_attr())[name]));
+  }
+
+  void ClearAttr(const string& name);
+
+  // Returns into '*e' the edge connecting to the 'idx' input of this Node.
+  Status input_edge(int idx, const Edge** e) const;
+
+  // Returns into '*n' the node that has an output connected to the
+  // 'idx' input of this Node.
+  Status input_node(int idx, const Node** n) const;
 
  private:
   friend class Graph;
@@ -135,7 +157,7 @@ class Node {
                const DataTypeSlice inputs, const DataTypeSlice outputs);
 
     const OpDef* op_def_;  // not owned
-    const NodeDef node_def_;
+    NodeDef node_def_;
     const DataTypeVector input_types_;
     const DataTypeVector output_types_;
 
@@ -154,6 +176,10 @@ class Node {
   // Releases memory from props_, in addition to restoring *this to its
   // uninitialized state.
   void Clear();
+  // Make a copy of the Node's props_ if props_ is shared with
+  // other nodes. This must be called before mutating properties,
+  // e.g. in AddAttr.
+  void MaybeCopyOnWrite();
 
   // A set of mutually exclusive classes for different kinds of nodes,
   // class_ is initialized in the Node::Initialize routine based on the
@@ -168,10 +194,15 @@ class Node {
     NC_LOOP_COND,
     NC_CONTROL_TRIGGER,
     NC_SEND,
+    NC_HOST_SEND,
     NC_RECV,
+    NC_HOST_RECV,
     NC_CONSTANT,
     NC_VARIABLE,
     NC_IDENTITY,
+    NC_GET_SESSION_HANDLE,
+    NC_GET_SESSION_TENSOR,
+    NC_DELETE_SESSION_TENSOR,
     NC_OTHER  // Not a special kind of node
   };
 
@@ -283,6 +314,9 @@ class Graph {
   // array's size.
   int num_edges() const { return edges().size(); }
 
+  // Serialize the nodes starting at `from_node_id` to a GraphDef.
+  void ToGraphDefSubRange(GraphDef* graph_def, int from_node_id) const;
+
   // Serialize to a GraphDef.
   void ToGraphDef(GraphDef* graph_def) const;
 
@@ -381,6 +415,8 @@ inline bool IsLoopCond(const Node* node) { return node->IsLoopCond(); }
 inline bool IsControlTrigger(const Node* n) { return n->IsControlTrigger(); }
 inline bool IsSend(const Node* node) { return node->IsSend(); }
 inline bool IsRecv(const Node* node) { return node->IsRecv(); }
+inline bool IsHostSend(const Node* node) { return node->IsHostSend(); }
+inline bool IsHostRecv(const Node* node) { return node->IsHostRecv(); }
 
 // True for Nodes that mediate the transfer of values between processes.
 inline bool IsTransferNode(const Node* n) { return IsSend(n) || IsRecv(n); }

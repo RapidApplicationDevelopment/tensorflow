@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,12 +20,15 @@ limitations under the License.
 namespace tensorflow {
 namespace lookup {
 
-Status InitializableLookupTable::Find(const Tensor& keys, Tensor* values,
+Status InitializableLookupTable::Find(OpKernelContext* ctx, const Tensor& keys,
+                                      Tensor* values,
                                       const Tensor& default_value) {
   if (!is_initialized()) {
     return errors::FailedPrecondition("Table not initialized.");
   }
-  TF_RETURN_IF_ERROR(CheckFindArguments(keys, *values, default_value));
+  // Do not let the use migrate before the check;  table is used without
+  // a lock by the readers.
+  std::atomic_thread_fence(std::memory_order_acquire);
   return DoFind(keys, values, default_value);
 }
 
@@ -48,6 +51,10 @@ Status InitializableLookupTable::Initialize(InitTableIterator& iter) {
   if (!errors::IsOutOfRange(iter.status())) {
     return iter.status();
   }
+
+  // Prevent compiler/memory reordering of is_initialized and
+  // the initialization itself.
+  std::atomic_thread_fence(std::memory_order_release);
   is_initialized_ = true;
   return Status::OK();
 }

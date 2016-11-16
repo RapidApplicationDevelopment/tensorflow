@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -236,6 +236,14 @@ class VariableOpTest(tf.test.TestCase):
           # only after the increment.
           result = tf.mul(var, var)
       self.assertAllClose([4.0], result.eval())
+
+  def testIsVariableInitialized(self):
+    for use_gpu in [True, False]:
+      with self.test_session(use_gpu=use_gpu):
+        v0 = state_ops.variable_op([1, 2], tf.float32)
+        self.assertEqual(False, tf.is_variable_initialized(v0).eval())
+        tf.assign(v0, [[2.0, 3.0]]).eval()
+        self.assertEqual(True, tf.is_variable_initialized(v0).eval())
 
 
 if __name__ == "__main__":

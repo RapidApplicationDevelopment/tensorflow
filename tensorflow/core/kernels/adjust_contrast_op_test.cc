@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,12 +31,9 @@ limitations under the License.
 namespace tensorflow {
 
 class AdjustContrastOpTest : public OpsTestBase {
- protected:
-  void MakeOp() { RequireDefaultOps(); }
 };
 
 TEST_F(AdjustContrastOpTest, Simple_1113) {
-  RequireDefaultOps();
   TF_EXPECT_OK(NodeDefBuilder("adjust_constrast_op", "AdjustContrastv2")
                    .Input(FakeInput(DT_FLOAT))
                    .Input(FakeInput(DT_FLOAT))
@@ -52,7 +49,6 @@ TEST_F(AdjustContrastOpTest, Simple_1113) {
 }
 
 TEST_F(AdjustContrastOpTest, Simple_1223) {
-  RequireDefaultOps();
   TF_EXPECT_OK(NodeDefBuilder("adjust_constrast_op", "AdjustContrastv2")
                    .Input(FakeInput(DT_FLOAT))
                    .Input(FakeInput(DT_FLOAT))

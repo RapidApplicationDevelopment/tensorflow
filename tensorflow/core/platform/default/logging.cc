@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ limitations under the License.
 
 #if defined(PLATFORM_POSIX_ANDROID)
 #include <android/log.h>
+#include <iostream>
 #include <sstream>
 #endif
 
@@ -55,8 +56,13 @@ void LogMessage::GenerateLogMessage() {
   }
 
   std::stringstream ss;
-  ss << fname_ << ":" << line_ << " " << str();
+  const char* const partial_name = strrchr(fname_, '/');
+  ss << (partial_name != nullptr ? partial_name + 1 : fname_) << ":" << line_
+     << " " << str();
   __android_log_write(android_log_level, "native", ss.str().c_str());
+
+  // Also log to stderr (for standalone Android apps).
+  std::cerr << "native : " << ss.str() << std::endl;
 
   // Android logging at level FATAL does not terminate execution, so abort()
   // is still required to stop the program.
@@ -84,6 +90,11 @@ LogMessageFatal::~LogMessageFatal() {
   // ATTRIBUTE_NORETURN).
   GenerateLogMessage();
   abort();
+}
+
+void LogString(const char* fname, int line, int severity,
+               const string& message) {
+  LogMessage(fname, line, severity) << message;
 }
 
 template <>

@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,15 +25,14 @@ namespace tensorflow {
 GraphOptimizer::GraphOptimizer(const OptimizerOptions& opts) : opts_(opts) {
   if (opts_.opt_level() >= OptimizerOptions::L1) {
     opts_.set_do_common_subexpression_elimination(true);
-  }
-  if (opts_.opt_level() >= OptimizerOptions::L2) {
     opts_.set_do_constant_folding(true);
   }
 }
 
 GraphOptimizer::~GraphOptimizer() {}
 
-void GraphOptimizer::Optimize(FunctionLibraryRuntime* runtime, Graph** graph) {
+void GraphOptimizer::Optimize(FunctionLibraryRuntime* runtime, Env* env,
+                              Device* device, Graph** graph) {
   Graph* g = *graph;
   for (const Node* n : g->nodes()) {
     if (n->IsControlFlow()) {
@@ -46,7 +45,7 @@ void GraphOptimizer::Optimize(FunctionLibraryRuntime* runtime, Graph** graph) {
   const int kMaxRounds = 10;
   for (int rounds = 0; rounds < kMaxRounds; ++rounds) {
     changed = false;
-    if (opts_.do_function_inlining() && RemoveListArrayConverter(g)) {
+    if (RemoveListArrayConverter(g)) {
       DumpGraph("RemoveListArrayConverter", g);
       changed = true;
     }
@@ -58,14 +57,16 @@ void GraphOptimizer::Optimize(FunctionLibraryRuntime* runtime, Graph** graph) {
       DumpGraph("RemoveIdentityNodes", g);
       changed = true;
     }
+
     if (opts_.do_constant_folding()) {
       ConstantFoldingOptions cf_opts;
-      if (DoConstantFolding(cf_opts, g)) {
+      if (DoConstantFolding(cf_opts, runtime, env, device, g)) {
         RemoveDeadNodes(g);
         DumpGraph("ConstFolding", g);
         changed = true;
       }
     }
+
     if (opts_.do_function_inlining() && FixupSourceAndSinkEdges(g)) {
       DumpGraph("FixupSourceAndSinkEdges", g);
       changed = true;

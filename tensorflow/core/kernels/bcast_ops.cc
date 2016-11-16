@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -58,12 +58,16 @@ class BCastGradArgsOp : public OpKernel {
     Output(ctx, 1, bcast.grad_y_reduce_idx());
   }
 
+  bool IsExpensive() override { return false; }
+
  private:
   void Output(OpKernelContext* ctx, int idx, const BCast::Vec& v) {
-    const int len = v.size();
+    const int64 len = v.size();
     Tensor* o = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(idx, TensorShape({len}), &o));
-    for (int i = 0; i < len; ++i) o->flat<int32>()(i) = v[i];
+    for (int64 i = 0; i < len; ++i) {
+      o->flat<int32>()(i) = static_cast<int32>(v[i]);
+    }
   }
 
   TF_DISALLOW_COPY_AND_ASSIGN(BCastGradArgsOp);
@@ -71,6 +75,7 @@ class BCastGradArgsOp : public OpKernel {
 
 REGISTER_KERNEL_BUILDER(Name("BroadcastGradientArgs")
                             .Device(DEVICE_CPU)
+                            .TypeConstraint<int32>("T")
                             .HostMemory("s0")
                             .HostMemory("s1")
                             .HostMemory("r0")
@@ -78,10 +83,21 @@ REGISTER_KERNEL_BUILDER(Name("BroadcastGradientArgs")
                         BCastGradArgsOp);
 REGISTER_KERNEL_BUILDER(Name("BroadcastGradientArgs")
                             .Device(DEVICE_GPU)
+                            .TypeConstraint<int32>("T")
                             .HostMemory("s0")
                             .HostMemory("s1")
                             .HostMemory("r0")
                             .HostMemory("r1"),
                         BCastGradArgsOp);
 
+#if TENSORFLOW_USE_SYCL
+REGISTER_KERNEL_BUILDER(Name("BroadcastGradientArgs")
+                            .Device(DEVICE_SYCL)
+                            .TypeConstraint<int32>("T")
+                            .HostMemory("s0")
+                            .HostMemory("s1")
+                            .HostMemory("r0")
+                            .HostMemory("r1"),
+                        BCastGradArgsOp);
+#endif
 }  // end namespace tensorflow

@@ -1,4 +1,4 @@
-/* Copyright 2015 Google Inc. All Rights Reserved.
+/* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/core/framework/tensor_shape.h"
 
+#include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/lib/random/simple_philox.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/lib/strings/strcat.h"
@@ -85,6 +86,21 @@ TEST(TensorShapeTest, InvalidShapeProto) {
   proto.add_dim()->set_size(1LL << 20);
   proto.add_dim()->set_size((1LL << 20) + 1);
   EXPECT_FALSE(TensorShape::IsValid(proto));
+}
+
+TEST(TensorShapeTest, TooManyDimsProto) {
+  TensorShapeProto proto;
+  // Deliberate redundancy to ensure that both paths work.
+  EXPECT_TRUE(TensorShape::IsValid(proto));
+  TF_EXPECT_OK(TensorShape::IsValidShape(proto));
+  for (int i = 0; i < TensorShape::MaxDimensions(); i++) {
+    proto.add_dim()->set_size(1);
+  }
+  EXPECT_TRUE(TensorShape::IsValid(proto));
+  TF_EXPECT_OK(TensorShape::IsValidShape(proto));
+  proto.add_dim()->set_size(1);
+  EXPECT_FALSE(TensorShape::IsValid(proto));
+  EXPECT_FALSE(TensorShape::IsValidShape(proto).ok());
 }
 
 TEST(TensorShapeTest, SetDimForEmptyTensor) {
@@ -457,6 +473,15 @@ TEST(TensorShapeTest, Randomized) {
       fprintf(stderr, "ITERATION %d: %s\n", i, sp.DebugString().c_str());
     }
     EXPECT_EQ(s.num_elements(), sold.num_elements());
+
+    // Test moves.
+    TensorShape copy = s;
+    TensorShape moved(std::move(copy));
+    EXPECT_EQ(s, moved);
+    copy = s;
+    moved = std::move(copy);
+    EXPECT_EQ(s, moved);
+
     int64 ne = sold.num_elements();
     int r = gen.Uniform(100);
     if (r < 10) {
@@ -489,6 +514,45 @@ TEST(TensorShapeTest, Randomized) {
       sold = TensorShapeOld(sizes);
     }
   }
+}
+
+TEST(TensorShapeUtilsTest, StartsWith) {
+  EXPECT_TRUE(TensorShapeUtils::StartsWith(TensorShape({}), TensorShape({})));
+  EXPECT_TRUE(
+      TensorShapeUtils::StartsWith(TensorShape({2, 3}), TensorShape({})));
+  EXPECT_TRUE(
+      TensorShapeUtils::StartsWith(TensorShape({2, 3}), TensorShape({2})));
+  EXPECT_TRUE(
+      TensorShapeUtils::StartsWith(TensorShape({2, 3}), TensorShape({2, 3})));
+  EXPECT_TRUE(TensorShapeUtils::StartsWith(TensorShape({2, 3, 4}),
+                                           TensorShape({2, 3})));
+  EXPECT_FALSE(
+      TensorShapeUtils::StartsWith(TensorShape({2, 3}), TensorShape({3})));
+  EXPECT_FALSE(
+      TensorShapeUtils::StartsWith(TensorShape({2, 3}), TensorShape({2, 4})));
+  EXPECT_FALSE(TensorShapeUtils::StartsWith(TensorShape({2, 3}),
+                                            TensorShape({2, 3, 4})));
+  EXPECT_FALSE(TensorShapeUtils::StartsWith(TensorShape({2, 3, 4}),
+                                            TensorShape({3, 4})));
+}
+
+TEST(TensorShapeUtilsTest, EndsWith) {
+  EXPECT_TRUE(TensorShapeUtils::EndsWith(TensorShape({}), TensorShape({})));
+  EXPECT_TRUE(TensorShapeUtils::EndsWith(TensorShape({2, 3}), TensorShape({})));
+  EXPECT_TRUE(
+      TensorShapeUtils::EndsWith(TensorShape({2, 3}), TensorShape({3})));
+  EXPECT_TRUE(
+      TensorShapeUtils::EndsWith(TensorShape({2, 3}), TensorShape({2, 3})));
+  EXPECT_TRUE(
+      TensorShapeUtils::EndsWith(TensorShape({2, 3, 4}), TensorShape({3, 4})));
+  EXPECT_FALSE(
+      TensorShapeUtils::EndsWith(TensorShape({2, 3}), TensorShape({2})));
+  EXPECT_FALSE(
+      TensorShapeUtils::EndsWith(TensorShape({2, 3}), TensorShape({2, 4})));
+  EXPECT_FALSE(
+      TensorShapeUtils::EndsWith(TensorShape({2, 3}), TensorShape({2, 3, 4})));
+  EXPECT_FALSE(
+      TensorShapeUtils::EndsWith(TensorShape({2, 3, 4}), TensorShape({2, 3})));
 }
 
 // A few different test cases for tensor sizes for benchmarks

@@ -1,4 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
+# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -81,8 +81,19 @@ class TopKTest(tf.test.TestCase):
   def testKTooLarge(self):
     inputs = [[0.1, 0.2], [0.3, 0.4]]
     with self.assertRaisesRegexp(
-        ValueError, r"input.shape \(2, 2\) must have last dimension >= k = 4"):
+        ValueError, r"must have last dimension >= k = 4"):
       tf.nn.top_k(inputs, 4)
+
+  def testTopKGradients(self):
+    with self.test_session() as sess:
+      inputs = tf.placeholder(tf.int32, shape=[2, 5])
+      values, _ = tf.nn.top_k(inputs, 3)
+      grad = sess.run(
+          tf.gradients(values,
+                       inputs,
+                       grad_ys=[[[1, 2, 3], [4, 5, 6]]]),
+          feed_dict={inputs: [[2, -1, 1000, 3, 4], [1, 5, 2, 4, 3]]})[0]
+    self.assertEqual(grad.tolist(), [[0, 0, 1, 3, 2], [0, 4, 0, 5, 6]])
 
 
 if __name__ == "__main__":
