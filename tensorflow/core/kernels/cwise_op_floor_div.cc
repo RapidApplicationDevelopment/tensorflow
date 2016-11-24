@@ -18,6 +18,10 @@ limitations under the License.
 namespace tensorflow {
 REGISTER5(BinaryOp, CPU, "FloorDiv", functor::safe_floor_div, uint8, uint16,
           int16, int32, int64);
+#if GOOGLE_CUDA
+REGISTER4(BinaryOp, GPU, "FloorDiv", functor::floor_div, uint8, uint16, int16,
+          int64);
+#endif
 #if TENSORFLOW_USE_SYCL
 #define REGISTER_SYCL_KERNEL(TYPE)                                    \
   REGISTER_KERNEL_BUILDER(                                            \
@@ -25,14 +29,9 @@ REGISTER5(BinaryOp, CPU, "FloorDiv", functor::safe_floor_div, uint8, uint16,
                           .Device(DEVICE_SYCL)                        \
                           .TypeConstraint<TYPE>("T"),                 \
                           BinaryOp<SYCLDevice, functor::floor_div<TYPE>>);
-TF_CALL_INTEGRAL_TYPES(REGISTER_SYCL_KERNEL);
+REGISTER_SYCL_KERNEL(float)
 #undef REGISTER_SYCL_KERNEL
 #endif // TENSORFLOW_USE_SYCL
-#if GOOGLE_CUDA
-REGISTER4(BinaryOp, GPU, "FloorDiv", functor::floor_div, uint8, uint16, int16,
-          int64);
-#endif
-
 #if GOOGLE_CUDA
 // A special GPU kernel for int32.
 // TODO(b/25387198): Also enable int32 in device memory. This kernel
